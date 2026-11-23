@@ -32,3 +32,6 @@ crashlytics-build.properties
 /dotnet/**/bin/
 /dotnet/**/obj/
 /dotnet/**/TestResults/
+
+# Local captures and scratch
+/Screenshots/
