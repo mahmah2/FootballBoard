@@ -1,0 +1,5 @@
+<!-- Keeps the rules config types from being stripped in IL2CPP builds (Android/iOS/Windows),
+     because Newtonsoft.Json creates them through reflection. -->
+<linker>
+    <assembly fullname="FootballBoard.Domain" preserve="all" />
+</linker>

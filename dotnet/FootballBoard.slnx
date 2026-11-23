@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="FootballBoard.Domain.Tests/FootballBoard.Domain.Tests.csproj" />
+  <Project Path="FootballBoard.Domain/FootballBoard.Domain.csproj" />
+</Solution>

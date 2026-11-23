@@ -1,0 +1,70 @@
+// Football Board Game — rules configuration (spec v1.1 + v1.3 decisions).
+// Any key you delete falls back to the built-in default. Unknown keys and
+// out-of-range values are rejected when the file is loaded.
+// Coordinates: column 0 is Red's goal line; Red attacks toward higher columns.
+{
+  "schemaVersion": 1,
+
+  "board": {
+    "rows": 13,                  // odd, >= 13 (bigger fields: 15, 17, ...)
+    "columns": 26,               // even, >= 26 (bigger fields: 28, 30, ...)
+    "goalWidth": 5,              // odd, centred on each short edge
+    "penaltyBoxWidth": 5,        // odd, >= goalWidth
+    "penaltyBoxDepth": 4,        // columns in front of the goal line, including it
+    "maxPlayersPerSquare": 2
+  },
+
+  "teams": {
+    "playersPerTeam": 5,         // including the goalkeeper; 2..11
+    // Optional fixed kick-off layouts per player count, written for Red
+    // (column = distance from own goal line, rowOffset = rows from the centre row).
+    // The first spot is the goalkeeper. Counts not listed get an automatic layout.
+    "formations": {
+      "5": [
+        { "column": 0, "rowOffset": 0 },
+        { "column": 5, "rowOffset": -2 },
+        { "column": 5, "rowOffset": 2 },
+        { "column": 10, "rowOffset": -2 },
+        { "column": 10, "rowOffset": 2 }
+      ]
+    }
+  },
+
+  "goalkeeper": {
+    "defaultMoveCells": 1,       // cells per turn, inside the own penalty box only
+    "allowedMoveCells": [1, 2],  // what the players may pick on the match-setup screen
+    // Goal chance for an on-target shot by distance from target cell to keeper
+    // (index 0 = same cell, 1 = one cell away, last value = that distance or more).
+    "goalChanceByDistance": [0.05, 0.5, 1.0]
+  },
+
+  "passing": {
+    "laneTolerance": 0.05,                    // fraction of a cell width around each cell centre
+    "revalidateLaneAfterMovement": false,     // v1.3: lane checked only at declaration
+    "longPassSuccessChance": 0.1111111111,    // 1/9; on failure the ball lands on 1 of the 8 cells around the receiver
+    "contestedDestinationSuccessChance": 0.5, // opponent on the receiver's square
+    "allowForwardPassFromSharedSquare": false
+  },
+
+  "shooting": {
+    "accuracyInsideBox": 1.0,          // chance the shot is on target within penaltyBoxDepth of the goal line
+    "accuracyAtCentreLine": 0.5,       // falls in a straight line from the box edge to the centre line, then stays
+    "contestedShooterWinChance": 0.5   // opponent on the shooter's square
+  },
+
+  "tackle": {
+    "enabled": true,
+    "successChance": 0.5
+  },
+
+  "clock": {
+    "secondsPerStep": 30,              // a team turn = arrangement step + action step
+    "defaultMinutes": 10,
+    "presetMinutes": [10, 20, 30, 40, 50, 60, 70, 90]
+  },
+
+  "ties": {
+    "offerGoldenGoal": true,
+    "goldenGoalRequiresBothTeams": true
+  }
+}
