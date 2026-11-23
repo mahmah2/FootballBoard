@@ -19,6 +19,7 @@ namespace FootballBoard.Domain.Config
         public GoalkeeperRules Goalkeeper { get; set; } = new GoalkeeperRules();
         public PassingRules Passing { get; set; } = new PassingRules();
         public ShootingRules Shooting { get; set; } = new ShootingRules();
+        public CarrierRules Carrier { get; set; } = new CarrierRules();
         public TackleRules Tackle { get; set; } = new TackleRules();
         public ClockRules Clock { get; set; } = new ClockRules();
         public TieRules Ties { get; set; } = new TieRules();
@@ -32,9 +33,9 @@ namespace FootballBoard.Domain.Config
             if (SchemaVersion != CurrentSchemaVersion)
                 e.Add($"schemaVersion must be {CurrentSchemaVersion} (found {SchemaVersion}).");
             if (Board == null || Teams == null || Goalkeeper == null || Passing == null ||
-                Shooting == null || Tackle == null || Clock == null || Ties == null)
+                Shooting == null || Carrier == null || Tackle == null || Clock == null || Ties == null)
             {
-                e.Add("All sections (board, teams, goalkeeper, passing, shooting, tackle, clock, ties) must be objects, not null.");
+                e.Add("All sections (board, teams, goalkeeper, passing, shooting, carrier, tackle, clock, ties) must be objects, not null.");
                 return e;
             }
 
@@ -243,6 +244,15 @@ namespace FootballBoard.Domain.Config
             if (AccuracyAtCentreLine > AccuracyInsideBox)
                 e.Add("shooting.accuracyAtCentreLine must not be greater than shooting.accuracyInsideBox.");
         }
+    }
+
+    public sealed class CarrierRules
+    {
+        /// <summary>
+        /// The ball carrier may move one cell with the ball during the other team's turn too
+        /// (it still cannot pass or shoot then). On its own turn it moves via the Move option.
+        /// </summary>
+        public bool CanMoveOnOpponentTurn { get; set; } = true;
     }
 
     public sealed class TackleRules

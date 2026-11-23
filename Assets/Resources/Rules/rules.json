@@ -52,6 +52,10 @@
     "contestedShooterWinChance": 0.5   // opponent on the shooter's square
   },
 
+  "carrier": {
+    "canMoveOnOpponentTurn": true   // the ball carrier may also move one cell on the other team's turn (never pass/shoot then)
+  },
+
   "tackle": {
     "enabled": true,
     "successChance": 0.5

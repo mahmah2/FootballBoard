@@ -209,8 +209,16 @@ namespace FootballBoard.Domain
                     return "Players move one cell per turn.";
                 }
 
-                if (carrier != null && player.Id == carrier.Id && option != CarrierOption.Move)
-                    return "The ball carrier can only move when the Move option is chosen.";
+                if (carrier != null && player.Id == carrier.Id)
+                {
+                    var mayMove = isTurnTeam
+                        ? option == CarrierOption.Move
+                        : Rules.Carrier.CanMoveOnOpponentTurn;
+                    if (!mayMove)
+                        return isTurnTeam
+                            ? "The ball carrier can only move when the Move option is chosen."
+                            : "The ball carrier cannot move on the other team's turn.";
+                }
                 if (isPass && player.Id == action.ReceiverId)
                     return "The pass receiver cannot move this turn.";
                 if (move.Tackle)

@@ -76,9 +76,21 @@ namespace FootballBoard.Domain.Tests
         }
 
         [Test]
-        public void DefendingCarrierCannotMove()
+        public void DefendingCarrierMayMoveWithTheBall()
         {
             var e = Create();
+            Arrange(e, Blue2, (Blue2, 15, 6));
+            PlayTurn(e, TeamPlan.Empty(), TeamPlan.Empty().WithMove(Blue2, new Cell(14, 6)));
+            Assert.That(Pos(e, Blue2), Is.EqualTo(new Cell(14, 6)));
+            Assert.That(e.State.BallCarrier.Id, Is.EqualTo(Blue2));
+        }
+
+        [Test]
+        public void DefendingCarrierLockCanBeEnabledInConfig()
+        {
+            var rules = RulesConfig.CreateDefault();
+            rules.Carrier.CanMoveOnOpponentTurn = false;
+            var e = Create(rules: rules);
             Arrange(e, Blue2, (Blue2, 15, 6));
             e.SubmitPlan(Team.Red, TeamPlan.Empty());
             Assert.That(e.SubmitPlan(Team.Blue, TeamPlan.Empty().WithMove(Blue2, new Cell(14, 6))).Accepted, Is.False);

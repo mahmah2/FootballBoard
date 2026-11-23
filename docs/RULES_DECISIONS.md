@@ -10,7 +10,7 @@ These are the defaults chosen where the spec was silent or ambiguous; change the
 | Turn order | Turn team submits its plan first (locked, hidden); the other team then submits moves. Both resolve together. |
 | Who acts | Only the turn team's carrier may pass/shoot/move with the ball. Both teams reposition every turn. |
 | Simultaneous moves | If a square would exceed 2 players, every move into it is cancelled (repeats until stable). Swaps are allowed. |
-| Locks | Carrier is locked unless option = Move. Pass receiver is locked. The other team's carrier is locked. |
+| Locks | On its own turn the carrier moves only with the Move option. On the other team's turn it may still move one cell with the ball (`carrier.canMoveOnOpponentTurn`), but never pass or shoot. Pass receiver is locked. |
 | Lane check | Straight pass lane checked at declaration (`revalidateLaneAfterMovement` = false). Any player of either team blocks. |
 | Long pass miss | Lands on one of 8 cells around the receiver. Opponent there → opponent; only teammates → teammate; empty → loose ball; off pitch → restart. |
 | Loose ball | Claimed by whoever stands on it after the next movement; two arrivals → random clash. |
