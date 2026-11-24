@@ -14,6 +14,8 @@ namespace FootballBoard.Domain
     /// hidden; then the other team submits its moves. Both plans then resolve together:
     /// simultaneous movement, loose-ball claims, tackles (arrangement step), then the declared
     /// pass or shot (action step). Each step uses clock.secondsPerStep of match time.
+    /// With turns.possessionTeamPlaysFirst the next turn goes to the team holding the ball
+    /// (the same team while the ball is loose, the conceding team after a goal).
     /// </summary>
     public sealed class MatchEngine
     {
@@ -51,7 +53,7 @@ namespace FootballBoard.Domain
                 settings.Mode,
                 settings.HumanTeam,
                 settings.PlayersPerTeam ?? rules.Teams.PlayersPerTeam,
-                settings.GoalkeeperMoveCells ?? rules.Goalkeeper.DefaultMoveCells,
+                rules.Goalkeeper.MaxMoveCells,
                 (settings.DurationMinutes ?? rules.Clock.DefaultMinutes) * 60);
 
             var engine = new MatchEngine(state, random);
@@ -249,17 +251,15 @@ namespace FootballBoard.Domain
             return result;
         }
 
-        /// <summary>Chance a shot from <paramref name="from"/> is on target.</summary>
+        /// <summary>
+        /// Chance a shot from <paramref name="from"/> is on target: full inside the opponent's penalty box,
+        /// then one drop per ring of squares around the box, never below the minimum.
+        /// </summary>
         public double ShotAccuracy(Team shooter, Cell from)
         {
             var r = Rules.Shooting;
-            var distance = Pitch.DistanceFromGoalLine(shooter.Opponent(), from);
-            double edge = Pitch.BoxDepth - 1;
-            var centre = (Pitch.Columns - 1) / 2.0;
-            if (distance <= edge) return r.AccuracyInsideBox;
-            var t = (distance - edge) / (centre - edge);
-            if (t >= 1) return r.AccuracyAtCentreLine;
-            return r.AccuracyInsideBox + (r.AccuracyAtCentreLine - r.AccuracyInsideBox) * t;
+            var ring = Pitch.RingsOutsidePenaltyBox(shooter.Opponent(), from);
+            return Math.Max(r.MinimumAccuracy, r.AccuracyInsideBox - ring * r.AccuracyDropPerRing);
         }
 
         /// <summary>Goal chance for an on-target shot, given the goalkeeper's distance from the target cell.</summary>
@@ -276,7 +276,19 @@ namespace FootballBoard.Domain
             switch (action.Option)
             {
                 case CarrierOption.Move:
+                    return null;
                 case CarrierOption.Shot:
+                    if (action.TargetCell.HasValue && !IsGoalCell(carrier.Team.Opponent(), action.TargetCell.Value))
+                        return "Aim the shot at one of the squares inside the opponent's goal.";
+                    return null;
+                case CarrierOption.LongPass when action.ReceiverId == null:
+                    if (action.TargetCell == null) return "Choose a teammate or a square for the long pass.";
+                    var target = action.TargetCell.Value;
+                    if (!Pitch.InBounds(target)) return "The long pass must land on the pitch.";
+                    if (target == carrier.Position) return "Choose a square away from the carrier.";
+                    if (!Rules.Passing.AllowForwardPassFromSharedSquare &&
+                        State.OccupancyAt(carrier.Position) > 1 && IsForward(carrier, target))
+                        return "A carrier sharing a square can only pass sideways or backwards.";
                     return null;
                 case CarrierOption.StraightPass:
                 case CarrierOption.LongPass:
@@ -298,6 +310,14 @@ namespace FootballBoard.Domain
 
         private static bool IsForward(Player from, Cell to) => (to.X - from.Position.X) * from.Team.AttackDirection() > 0;
 
+        /// <summary>True for the goal-line squares inside the goal defended by <paramref name="defending"/>.</summary>
+        public bool IsGoalCell(Team defending, Cell cell) =>
+            cell.X == Pitch.GoalLineX(defending) && cell.Y >= Pitch.GoalTop && cell.Y <= Pitch.GoalBottom;
+
+        /// <summary>The goal square a shot aims at: the chosen one, or the one in the shooter's row.</summary>
+        public Cell ShotTargetFor(Player shooter, CarrierAction action) =>
+            action?.TargetCell ?? Pitch.ShotTarget(shooter.Team, shooter.Position);
+
         private static string Name(Player p) => $"{p.Team} #{p.Number}";
 
         /// <summary>Shot blocking is judged on the board as it stands when the shot is declared.</summary>
@@ -307,7 +327,7 @@ namespace FootballBoard.Domain
             if (plan.Action == null || plan.Action.Option != CarrierOption.Shot) return;
 
             var shooter = State.BallCarrier;
-            var target = Pitch.ShotTarget(shooter.Team, shooter.Position);
+            var target = ShotTargetFor(shooter, plan.Action);
             int stepX = Math.Sign(target.X - shooter.Position.X), stepY = Math.Sign(target.Y - shooter.Position.Y);
             if (stepX == 0 && stepY == 0) return;
 
@@ -326,30 +346,25 @@ namespace FootballBoard.Domain
         private void ResolveTurn(TeamPlan turnPlan, TeamPlan otherPlan, List<GameEvent> events)
         {
             var turnTeam = State.TurnTeam;
-            var action = turnPlan.Action;
-            var declaredCarrierId = State.PendingCarrierId;
-
-            // Arrangement step.
-            events.Add(new StepStarted(StepKind.Arrangement));
-            var executed = ResolveMovement(turnPlan.Moves.Concat(otherPlan.Moves).ToList(), events);
-            var clashed = ClaimLooseBall(events);
-            ResolveTackles(executed, clashed, events);
-            AdvanceClock(events);
-
-            // Action step (skipped if time ran out during the arrangement step).
+            var moves = turnPlan.Moves.Concat(otherPlan.Moves).ToList();
             Team? conceded = null;
-            if (!State.ClockExpired)
+
+            if (Rules.Turns.ActionBeforeMovement)
             {
-                events.Add(new StepStarted(StepKind.Action));
-                if (declaredCarrierId.HasValue && action != null && action.Option != CarrierOption.Move)
+                // Pass or shot first, on the board both teams planned against; then everyone moves.
+                conceded = ActionStep(turnPlan, events);
+                if (!State.ClockExpired)
                 {
-                    var carrier = State.BallCarrier;
-                    if (carrier == null || carrier.Id != declaredCarrierId.Value)
-                        events.Add(new ActionCancelled(declaredCarrierId.Value, action.Option, "The carrier lost the ball before the action."));
-                    else
-                        conceded = ResolveAction(carrier, action, events);
+                    if (conceded.HasValue) events.Add(new StepStarted(StepKind.Arrangement)); // kick-off reset replaces the moves
+                    else ArrangementStep(moves, events);
+                    if (conceded.HasValue) AdvanceClock(events);
                 }
-                AdvanceClock(events);
+            }
+            else
+            {
+                // Spec v1.3 order: everyone moves, then the declared pass or shot.
+                ArrangementStep(moves, events);
+                if (!State.ClockExpired) conceded = ActionStep(turnPlan, events);
             }
 
             ClearPending();
@@ -366,6 +381,12 @@ namespace FootballBoard.Domain
                 ResetForKickoff(conceded.Value, events);
                 nextTeam = conceded.Value;
             }
+            else if (Rules.Turns.PossessionTeamPlaysFirst)
+            {
+                // The team holding the ball keeps taking the turns until the other team really owns it.
+                // A loose ball (an off-target long pass, say) does not switch the turn.
+                nextTeam = State.PossessionTeam ?? turnTeam;
+            }
 
             State.TurnTeam = nextTeam;
             if (State.ClockExpired)
@@ -376,12 +397,46 @@ namespace FootballBoard.Domain
             BeginTurn(nextTeam, events);
         }
 
+        /// <summary>Movement, loose-ball claims and tackles; one clock step.</summary>
+        private void ArrangementStep(List<MoveOrder> moves, List<GameEvent> events)
+        {
+            events.Add(new StepStarted(StepKind.Arrangement));
+            var executed = ResolveMovement(moves, events);
+            var clashed = ClaimLooseBall(events);
+            ResolveTackles(executed, clashed, events);
+            AdvanceClock(events);
+        }
+
+        /// <summary>The declared pass or shot; one clock step. Returns the conceding team after a goal.</summary>
+        private Team? ActionStep(TeamPlan turnPlan, List<GameEvent> events)
+        {
+            Team? conceded = null;
+            var action = turnPlan.Action;
+            var declaredCarrierId = State.PendingCarrierId;
+            events.Add(new StepStarted(StepKind.Action));
+            if (declaredCarrierId.HasValue && action != null && action.Option != CarrierOption.Move)
+            {
+                var carrier = State.BallCarrier;
+                if (carrier == null || carrier.Id != declaredCarrierId.Value)
+                    events.Add(new ActionCancelled(declaredCarrierId.Value, action.Option, "The carrier lost the ball before the action."));
+                else
+                    conceded = ResolveAction(carrier, action, events);
+            }
+            AdvanceClock(events);
+            return conceded;
+        }
+
         /// <summary>
         /// All moves happen at once. Any square that would end up over the limit cancels every move
-        /// into it; this repeats until no square is over the limit.
+        /// into it; this repeats until no square is over the limit. A player the action already
+        /// relocated (throw-in taker, goal-kick keeper, blocker) keeps its new square instead.
         /// </summary>
         private List<MoveOrder> ResolveMovement(List<MoveOrder> moves, List<GameEvent> events)
         {
+            var relocated = moves.Where(m => !GetMoveTargets(m.PlayerId).Contains(m.Target)).ToList();
+            foreach (var m in relocated) events.Add(new MoveCancelled(m.PlayerId, m.Target));
+            moves = moves.Except(relocated).ToList();
+
             var byPlayer = moves.ToDictionary(m => m.PlayerId);
             var cancelled = new HashSet<int>();
 
@@ -460,10 +515,11 @@ namespace FootballBoard.Domain
                     ResolveStraightPass(carrier, State.GetPlayer(action.ReceiverId.Value), events);
                     return null;
                 case CarrierOption.LongPass:
-                    ResolveLongPass(carrier, State.GetPlayer(action.ReceiverId.Value), events);
+                    var receiver = action.ReceiverId.HasValue ? State.GetPlayer(action.ReceiverId.Value) : null;
+                    ResolveLongPass(carrier, receiver, receiver?.Position ?? action.TargetCell.Value, events);
                     return null;
                 case CarrierOption.Shot:
-                    return ResolveShot(carrier, events);
+                    return ResolveShot(carrier, ShotTargetFor(carrier, action), events);
                 default:
                     return null;
             }
@@ -479,21 +535,31 @@ namespace FootballBoard.Domain
             Deliver(PassKind.Straight, passer, receiver, events);
         }
 
-        private void ResolveLongPass(Player passer, Player receiver, List<GameEvent> events)
+        /// <summary>
+        /// Long pass to a teammate or to a square. On target (longPassSuccessChance) the ball arrives at the
+        /// target; otherwise it lands on one of the 8 squares around it.
+        /// </summary>
+        private void ResolveLongPass(Player passer, Player receiver, Cell target, List<GameEvent> events)
         {
+            var receiverId = receiver?.Id;
             if (_random.Chance(Rules.Passing.LongPassSuccessChance))
             {
-                Deliver(PassKind.Long, passer, receiver, events);
+                if (receiver != null)
+                {
+                    Deliver(PassKind.Long, passer, receiver, events);
+                    return;
+                }
+                ArriveAtSquare(passer, target, events);
                 return;
             }
 
-            var neighbours = Pitch.Neighbours(receiver.Position);
+            var neighbours = Pitch.Neighbours(target);
             var landing = neighbours[_random.NextInt(neighbours.Count)];
 
             if (!Pitch.InBounds(landing))
             {
                 State.LastTouch = passer.Team;
-                events.Add(new PassResolved(PassKind.Long, passer.Id, receiver.Id, PassOutcome.OutOfPlay, null, landing, false));
+                events.Add(new PassResolved(PassKind.Long, passer.Id, receiverId, PassOutcome.OutOfPlay, null, landing, false, target));
                 HandleOutOfPlay(landing, passer.Team, events);
                 return;
             }
@@ -504,21 +570,51 @@ namespace FootballBoard.Domain
             {
                 var taker = Pick(opponents);
                 GiveBall(taker);
-                events.Add(new PassResolved(PassKind.Long, passer.Id, receiver.Id, PassOutcome.LandedOnOpponent, taker.Id, landing, false));
+                events.Add(new PassResolved(PassKind.Long, passer.Id, receiverId, PassOutcome.LandedOnOpponent, taker.Id, landing, false, target));
             }
             else if (occupants.Count > 0)
             {
                 var taker = Pick(occupants);
                 GiveBall(taker);
-                events.Add(new PassResolved(PassKind.Long, passer.Id, receiver.Id, PassOutcome.LandedOnTeammate, taker.Id, landing, false));
+                events.Add(new PassResolved(PassKind.Long, passer.Id, receiverId, PassOutcome.LandedOnTeammate, taker.Id, landing, false, target));
             }
             else
             {
-                State.Ball.OwnerId = null;
-                State.Ball.LoosePosition = landing;
-                State.LastTouch = passer.Team;
-                events.Add(new PassResolved(PassKind.Long, passer.Id, receiver.Id, PassOutcome.LooseBall, null, landing, false));
+                SetLoose(landing, passer.Team);
+                events.Add(new PassResolved(PassKind.Long, passer.Id, receiverId, PassOutcome.LooseBall, null, landing, false, target));
             }
+        }
+
+        /// <summary>
+        /// An accurate long pass into a chosen square. Empty: the ball waits there for whoever runs onto it.
+        /// Teammates only: a teammate has it. Opponents only: an opponent has it. Both: 50/50 (contested).
+        /// </summary>
+        private void ArriveAtSquare(Player passer, Cell square, List<GameEvent> events)
+        {
+            var occupants = State.PlayersAt(square).OrderBy(p => p.Id).ToList();
+            var mates = occupants.Where(p => p.Team == passer.Team).ToList();
+            var opponents = occupants.Where(p => p.Team != passer.Team).ToList();
+
+            if (occupants.Count == 0)
+            {
+                SetLoose(square, passer.Team);
+                events.Add(new PassResolved(PassKind.Long, passer.Id, null, PassOutcome.ReachedSquare, null, square, false, square));
+                return;
+            }
+
+            var contested = mates.Count > 0 && opponents.Count > 0;
+            var ours = mates.Count > 0 && (!contested || _random.Chance(Rules.Passing.ContestedDestinationSuccessChance));
+            var taker = Pick(ours ? mates : opponents);
+            GiveBall(taker);
+            events.Add(new PassResolved(PassKind.Long, passer.Id, null, ours ? PassOutcome.Completed : PassOutcome.Intercepted,
+                taker.Id, square, contested, square));
+        }
+
+        private void SetLoose(Cell cell, Team lastTouch)
+        {
+            State.Ball.OwnerId = null;
+            State.Ball.LoosePosition = cell;
+            State.LastTouch = lastTouch;
         }
 
         /// <summary>Ball arrives at the receiver; an opponent on the same square contests it.</summary>
@@ -546,10 +642,9 @@ namespace FootballBoard.Domain
         }
 
         /// <summary>Returns the conceding team if a goal was scored.</summary>
-        private Team? ResolveShot(Player shooter, List<GameEvent> events)
+        private Team? ResolveShot(Player shooter, Cell target, List<GameEvent> events)
         {
             var defending = shooter.Team.Opponent();
-            var target = Pitch.ShotTarget(shooter.Team, shooter.Position);
 
             if (State.PendingShotBlockerId.HasValue)
             {

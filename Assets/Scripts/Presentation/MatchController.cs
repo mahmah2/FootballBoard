@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using FootballBoard.Domain;
+using FootballBoard.Domain.AI;
 using FootballBoard.Domain.Config;
 using UnityEngine;
 
@@ -22,7 +23,7 @@ namespace FootballBoard.Presentation
         [SerializeField] private Hud hud;
         [SerializeField] private bool hideBoardDuringHandover = true;
 
-        private enum Mode { Menu, Handover, Planning, PickReceiver, Resolving, Decision, Over }
+        private enum Mode { Menu, Handover, Planning, PickReceiver, ComputerPlanning, Resolving, Decision, Over }
 
         private RulesConfig _rules;
         private MatchEngine _engine;
@@ -44,7 +45,12 @@ namespace FootballBoard.Presentation
         private readonly Dictionary<int, MoveOrder> _moves = new Dictionary<int, MoveOrder>();
         private CarrierAction _action;
         private int? _selected;
-        private int _minutesIndex, _keeperIndex;
+        private int _minutesIndex;
+        private int _opponentIndex;   // 0 = computer, 1 = hot-seat
+        private int _humanTeamIndex;  // 0 = Red, 1 = Blue
+        private IMatchStrategy _strategy;
+
+        private bool IsComputer(Team team) => S.Mode == GameMode.HumanVsComputer && team != S.HumanTeam;
 
         // ------------------------------------------------------------------ lifecycle
 
@@ -53,7 +59,6 @@ namespace FootballBoard.Presentation
             _rules = RulesConfigLoader.FromJsonOrDefault(rulesJson != null ? rulesJson.text : null, out var errors);
             foreach (var error in errors) Debug.LogWarning("[Rules] " + error + " (using defaults)");
             _minutesIndex = Mathf.Max(0, _rules.Clock.PresetMinutes.IndexOf(_rules.Clock.DefaultMinutes));
-            _keeperIndex = Mathf.Max(0, _rules.Goalkeeper.AllowedMoveCells.IndexOf(_rules.Goalkeeper.DefaultMoveCells));
             _kit = new MaterialKit(opaqueTemplate, transparentTemplate);
 
             hud.Build();
@@ -73,24 +78,38 @@ namespace FootballBoard.Presentation
         private void ShowMenu()
         {
             _mode = Mode.Menu;
-            var minutes = _rules.Clock.PresetMinutes[_minutesIndex];
-            var keeper = _rules.Goalkeeper.AllowedMoveCells[_keeperIndex];
+            var vsComputer = _opponentIndex == 0;
             hud.ShowOverlay("FOOTBALL BOARD",
-                "Local two-player match: pass the device between turns.\nThe computer opponent arrives in the next phase.",
+                vsComputer
+                    ? "Play against the computer. Choose your team and the match length."
+                    : "Two players on one device: pass it between turns.",
                 Palette.Accent, true,
-                ($"MATCH LENGTH: {minutes} MIN", () => { _minutesIndex = (_minutesIndex + 1) % _rules.Clock.PresetMinutes.Count; ShowMenu(); }, false),
-                ($"KEEPER MOVES: {keeper} CELL{(keeper == 1 ? "" : "S")}", () => { _keeperIndex = (_keeperIndex + 1) % _rules.Goalkeeper.AllowedMoveCells.Count; ShowMenu(); }, false),
                 ("KICK OFF", StartMatch, true));
+            var row = 0;
+            hud.AddOverlayDropdown("OpponentDropdown", row++,
+                new List<string> { "OPPONENT: COMPUTER", "OPPONENT: 2 PLAYERS (HOT-SEAT)" },
+                _opponentIndex,
+                index => { _opponentIndex = index; ShowMenu(); });
+            if (vsComputer)
+                hud.AddOverlayDropdown("TeamDropdown", row++,
+                    new List<string> { "YOU PLAY: RED", "YOU PLAY: BLUE" },
+                    _humanTeamIndex,
+                    index => _humanTeamIndex = index);
+            hud.AddOverlayDropdown("MatchLengthDropdown", row,
+                _rules.Clock.PresetMinutes.Select(m => $"MATCH LENGTH: {m} MIN").ToList(),
+                _minutesIndex,
+                index => _minutesIndex = index);
         }
 
         private void StartMatch()
         {
             var settings = new MatchSettings
             {
-                Mode = GameMode.HumanVsHuman,
-                DurationMinutes = _rules.Clock.PresetMinutes[_minutesIndex],
-                GoalkeeperMoveCells = _rules.Goalkeeper.AllowedMoveCells[_keeperIndex]
+                Mode = _opponentIndex == 0 ? GameMode.HumanVsComputer : GameMode.HumanVsHuman,
+                HumanTeam = _humanTeamIndex == 0 ? Team.Red : Team.Blue,
+                DurationMinutes = _rules.Clock.PresetMinutes[_minutesIndex]
             };
+            _strategy = new BasicStrategy();
             _engine = MatchEngine.Create(_rules, settings);
             BuildWorld();
             var result = _engine.StartMatch();
@@ -140,22 +159,66 @@ namespace FootballBoard.Presentation
 
         private void BeginHandover(Team team)
         {
+            if (IsComputer(team))
+            {
+                StartCoroutine(ComputerPlans(team));
+                return;
+            }
+            if (S.Mode == GameMode.HumanVsComputer)
+            {
+                // No device to pass around: go straight to planning with a short briefing.
+                BeginPlanning(team);
+                var hasBall = S.PossessionTeam == team;
+                hud.ShowMessage(S.Ball.IsLoose ? "The ball is loose: get a player onto it first (two arrivals = 50/50)."
+                    : hasBall && team == S.TurnTeam ? "Your ball: move it, pass, play it long or shoot. Then press CONFIRM."
+                    : hasBall ? "You keep the ball on the computer's turn: move with it or reposition."
+                    : "Defend: you move after their pass or shot. Step onto the ball to tackle. Then press CONFIRM.");
+                return;
+            }
+
             _mode = Mode.Handover;
             hud.SetPlanControls(false, false, CarrierOption.Move);
-            string subtitle;
+            string situation, instruction;
+            var other = Name(team.Opponent());
             if (team == S.TurnTeam)
             {
                 var hasBall = S.PossessionTeam == team;
-                subtitle = $"Turn {S.TurnNumber} — your turn. " + (hasBall
+                situation = $"Turn {S.TurnNumber} — you plan first. " + (hasBall
                     ? "You have the ball: move it, pass, play it long or shoot."
                     : S.Ball.IsLoose ? "The ball is loose: get a player onto it." : "Reposition your players to win the ball.");
+                instruction = $"Arrange your plan and press CONFIRM, then hand the device to the {other} player.";
             }
             else
             {
-                subtitle = $"{Name(team.Opponent())} has planned. Reposition to defend.\nStep onto the ball carrier to request a tackle.";
+                situation = S.Ball.IsLoose
+                    ? $"{other} has planned. The ball is loose: get a player onto it first (two arrivals = 50/50)."
+                    : S.PossessionTeam == team
+                    ? $"{other} has planned. You keep the ball: move with it or reposition (pass or shoot on your own turn)."
+                    : $"{other} has planned. Reposition to defend: you move after their pass or shot.\nStep onto whoever ends up with the ball to request a tackle.";
+                instruction = "Arrange your plan and press CONFIRM. The turn then plays out: the pass or shot first, then everyone moves.";
             }
-            hud.ShowOverlay($"{Name(team)} TO PLAN", subtitle + "\n\nHand the device over, then press Ready.",
+            hud.ShowOverlay($"{Name(team)} TO PLAN", $"{situation}\n\n{instruction}\nPress READY when you are holding the device.",
                 Palette.TeamPrimary(team), hideBoardDuringHandover, ("READY", () => BeginPlanning(team), true));
+        }
+
+        /// <summary>The computer plans from the public board only (it cannot see a hidden human plan).</summary>
+        private IEnumerator ComputerPlans(Team team)
+        {
+            _mode = Mode.ComputerPlanning;
+            hud.SetPlanControls(false, false, CarrierOption.Move);
+            hud.SetStatus("COMPUTER IS PLANNING…", Palette.TeamPrimary(team));
+            yield return new WaitForSeconds(0.6f);
+
+            var result = _engine.SubmitPlan(team, _strategy.PlanTurn(_engine, team));
+            if (!result.Accepted)
+            {
+                Debug.LogError("[Computer] Plan rejected: " + result.Error);
+                result = _engine.SubmitPlan(team, TeamPlan.Empty());
+            }
+            if (result.Events.OfType<PlanLocked>().Any())
+                BeginHandover(S.PlanningTeam);
+            else
+                StartCoroutine(Resolve(result.Events));
         }
 
         private void BeginPlanning(Team team)
@@ -172,6 +235,11 @@ namespace FootballBoard.Presentation
 
         private void AskTie(Team team)
         {
+            if (IsComputer(team))
+            {
+                ChooseTie(team, _strategy.ChooseTie(_engine, team));
+                return;
+            }
             _mode = Mode.Decision;
             hud.ShowOverlay($"FULL TIME {S.Score(Team.Red)} - {S.Score(Team.Blue)}",
                 $"{Name(team)}: take the draw, or play golden goal (next goal wins)?\nYour choice stays hidden from the other player.",
@@ -207,7 +275,9 @@ namespace FootballBoard.Presentation
             _mode = Mode.Over;
             hud.SetPlanControls(false, false, CarrierOption.Move);
             var result = S.Result;
-            var title = result.IsDraw ? "DRAW" : $"{Name(result.Winner.Value)} WINS";
+            var title = result.IsDraw ? "DRAW"
+                : S.Mode == GameMode.HumanVsComputer ? (result.Winner == S.HumanTeam ? "YOU WIN" : "COMPUTER WINS")
+                : $"{Name(result.Winner.Value)} WINS";
             var color = result.IsDraw ? Palette.Chalk : Palette.TeamPrimary(result.Winner.Value);
             hud.ShowOverlay(title, $"Red {result.RedScore} - {result.BlueScore} Blue" + (result.DecidedByGoldenGoal ? "  (golden goal)" : ""),
                 color, false, ("PLAY AGAIN", ShowMenu, true));
@@ -236,14 +306,13 @@ namespace FootballBoard.Presentation
                     _mode = Mode.PickReceiver;
                     hud.ShowMessage(option == CarrierOption.StraightPass
                         ? "Tap a teammate with a clear lane (any player in between blocks it)."
-                        : "Tap any teammate. A long pass flies over everyone but only lands 1 time in 9.");
+                        : "Tap a teammate, or any square to play the ball into space. It lands on target 1 time in 9.");
                     break;
                 case CarrierOption.Shot:
                     _moves.Remove(carrier.Id);
-                    _action = CarrierAction.Shot();
+                    _action = CarrierAction.Shot(S.Pitch.ShotTarget(carrier.Team, carrier.Position));
                     _mode = Mode.Planning;
-                    var odds = _engine.ShotAccuracy(carrier.Team, carrier.Position);
-                    hud.ShowMessage($"Shot declared. On-target chance from here: {odds:P0}.");
+                    ShowShotOdds();
                     break;
             }
             _selected = null;
@@ -264,13 +333,29 @@ namespace FootballBoard.Presentation
                 if (tapped != null && tapped.Team == _planner && tapped.Id != carrier.Id)
                 {
                     var id = tapped.Id;
-                    if (TryChange(() => { _action.ReceiverId = id; _moves.Remove(id); }))
+                    if (TryChange(() => { _action.ReceiverId = id; _action.TargetCell = null; _moves.Remove(id); }))
                         _mode = Mode.Planning;
+                }
+                else if (_action.Option == CarrierOption.LongPass && S.Pitch.InBounds(cell))
+                {
+                    if (TryChange(() => { _action.ReceiverId = null; _action.TargetCell = cell; }))
+                    {
+                        _mode = Mode.Planning;
+                        hud.ShowMessage("Ball into space: move a player onto that square to collect it. Two arrivals = 50/50.");
+                    }
                 }
                 else
                 {
                     hud.ShowMessage("Tap one of your teammates to receive the pass.", true);
                 }
+                Refresh();
+                return;
+            }
+
+            // With a shot declared, tapping a square inside the opponent's goal re-aims it.
+            if (_action != null && _action.Option == CarrierOption.Shot && _engine.IsGoalCell(_planner.Opponent(), cell))
+            {
+                if (TryChange(() => _action.TargetCell = cell)) ShowShotOdds();
                 Refresh();
                 return;
             }
@@ -311,6 +396,8 @@ namespace FootballBoard.Presentation
                 else
                 {
                     _selected = tapped.Id;
+                    if (tapped.IsGoalkeeper)
+                        hud.ShowMessage($"Goalkeeper: tap a square up to {S.Rules.Goalkeeper.MaxMoveCells} cells away, inside the penalty box.");
                 }
             }
             else
@@ -318,6 +405,16 @@ namespace FootballBoard.Presentation
                 _selected = null;
             }
             Refresh();
+        }
+
+        private void ShowShotOdds()
+        {
+            var carrier = S.BallCarrier;
+            var target = _engine.ShotTargetFor(carrier, _action);
+            var accuracy = _engine.ShotAccuracy(carrier.Team, carrier.Position);
+            var keeper = S.Goalkeeper(carrier.Team.Opponent());
+            var goal = _engine.GoalChance(target.DistanceTo(keeper.Position));
+            hud.ShowMessage($"Tap a goal square to aim. On target {accuracy:P0}, then beats the keeper {goal:P0} (if the keeper stays put).");
         }
 
         private string LockReason(Player player)
@@ -337,7 +434,7 @@ namespace FootballBoard.Presentation
         private bool TryChange(System.Action change)
         {
             var movesBackup = _moves.Values.Select(m => new MoveOrder(m.PlayerId, m.Target, m.Tackle)).ToList();
-            var actionBackup = _action == null ? null : new CarrierAction { Option = _action.Option, ReceiverId = _action.ReceiverId };
+            var actionBackup = _action == null ? null : new CarrierAction { Option = _action.Option, ReceiverId = _action.ReceiverId, TargetCell = _action.TargetCell };
             change();
             var error = _engine.ValidatePlan(_planner, BuildPlan());
             if (error == null) return true;
@@ -351,7 +448,8 @@ namespace FootballBoard.Presentation
         private TeamPlan BuildPlan()
         {
             var plan = new TeamPlan { Moves = _moves.Values.ToList() };
-            var pendingReceiver = _action != null && (_action.Option == CarrierOption.StraightPass || _action.Option == CarrierOption.LongPass) && _action.ReceiverId == null;
+            var pendingReceiver = _action != null && (_action.Option == CarrierOption.StraightPass || _action.Option == CarrierOption.LongPass)
+                && _action.ReceiverId == null && _action.TargetCell == null;
             if (_action != null && !pendingReceiver) plan.Action = _action;
             return plan;
         }
@@ -452,7 +550,18 @@ namespace FootballBoard.Presentation
                 var from = _figures[carrier.Id].transform.position;
                 if (_action.Option == CarrierOption.Shot)
                 {
-                    _board.DrawArrow(from, _space.CellToWorld(S.Pitch.ShotTarget(carrier.Team, carrier.Position)), Palette.WithAlpha(Palette.Accent, 0.9f), 0.12f);
+                    var aim = _engine.ShotTargetFor(carrier, _action);
+                    for (var y = S.Pitch.GoalTop; y <= S.Pitch.GoalBottom; y++)
+                    {
+                        var goalCell = new Cell(S.Pitch.GoalLineX(_planner.Opponent()), y);
+                        _board.HighlightCell(goalCell, Palette.WithAlpha(Palette.Accent, goalCell == aim ? 0.6f : 0.18f));
+                    }
+                    _board.DrawArrow(from, _space.CellToWorld(aim), Palette.WithAlpha(Palette.Accent, 0.9f), 0.12f);
+                }
+                else if (_action.Option == CarrierOption.LongPass && _action.TargetCell.HasValue)
+                {
+                    _board.HighlightCell(_action.TargetCell.Value, Palette.WithAlpha(Palette.Chalk, 0.5f), 0.6f);
+                    _board.DrawArrow(from, _space.CellToWorld(_action.TargetCell.Value), Palette.WithAlpha(Palette.Chalk, 0.9f), 0.12f);
                 }
                 else if (_action.ReceiverId.HasValue)
                 {
@@ -561,7 +670,9 @@ namespace FootballBoard.Presentation
             foreach (var e in run.OfType<MoveCancelled>())
                 routines.Add(StartCoroutine(_figures[e.PlayerId].Shake(0.3f)));
             foreach (var r in routines) yield return r;
-            if (run.OfType<MoveCancelled>().Any()) hud.ShowMessage("Some moves were cancelled: a square can hold at most two players.");
+            if (_viewOwner.HasValue) PlaceBall(); // squares may now be shared: keep the ball on the owner's side
+            if (run.OfType<MoveCancelled>().Any())
+                hud.ShowMessage("Some moves were cancelled: the square was full, or the player had just been moved by a restart.");
         }
 
         private IEnumerator AnimatePass(PassResolved pass)
@@ -583,7 +694,8 @@ namespace FootballBoard.Presentation
                 case PassOutcome.Intercepted: title = "INTERCEPTED"; break;
                 case PassOutcome.LandedOnOpponent: title = "OVERHIT — OPPONENT'S BALL"; break;
                 case PassOutcome.LandedOnTeammate: title = "OVERHIT — STILL OURS"; break;
-                case PassOutcome.LooseBall: title = "LOOSE BALL"; break;
+                case PassOutcome.LooseBall: title = "OFF TARGET — LOOSE BALL"; break;
+                case PassOutcome.ReachedSquare: title = "ON TARGET (1 IN 9)"; break;
                 default: title = "OUT OF PLAY"; break;
             }
             yield return hud.Banner(title, isLong ? "Long pass" : "Contested pass", Palette.Accent, 1.0f, true);
@@ -661,8 +773,14 @@ namespace FootballBoard.Presentation
             if (_viewOwner.HasValue)
             {
                 var figure = _figures[_viewOwner.Value];
-                var dir = figure.Team.AttackDirection();
-                _ball.Follow(figure.transform, new Vector3(dir * 0.28f, 0f, -0.26f));
+                // Alone: ball at the feet, toward the attack. Sharing a square: on the owner's outer side,
+                // away from the other player, so it is clear who has it.
+                var cell = _viewCells[_viewOwner.Value];
+                var mates = _viewCells.Where(kv => kv.Value == cell).Select(kv => kv.Key).OrderBy(id => id).ToList();
+                var side = mates.Count > 1
+                    ? (mates.IndexOf(_viewOwner.Value) == 0 ? -1f : 1f)
+                    : figure.Team.AttackDirection();
+                _ball.Follow(figure.transform, new Vector3(side * (mates.Count > 1 ? 0.34f : 0.28f), 0f, -0.2f));
             }
             else
             {

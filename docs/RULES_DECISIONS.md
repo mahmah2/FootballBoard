@@ -7,18 +7,22 @@ These are the defaults chosen where the spec was silent or ambiguous; change the
 | Topic | Decision |
 |---|---|
 | Coordinates | Column 0 = Red goal line, Red attacks toward higher columns. Rows 0-based (13 rows → goal rows 4–8 = rows 5–9 in the spec). |
-| Turn order | Turn team submits its plan first (locked, hidden); the other team then submits moves. Both resolve together. |
-| Who acts | Only the turn team's carrier may pass/shoot/move with the ball. Both teams reposition every turn. |
+| Turn order | The turn team submits its plan first (locked, hidden); the other team then submits moves. Both resolve together. The **team holding the ball takes every turn** (B R, B R… until Red wins the ball, then R B, R B…). While the ball is loose (e.g. an off-target long pass) the turn stays with the team that had it; it only switches once the other team actually owns the ball. After a goal the conceding team takes it. `turns.possessionTeamPlaysFirst = false` restores strict alternation (spec v1.3). |
+| Who acts | Only the turn team's carrier may pass or shoot. Both teams reposition every turn. |
 | Simultaneous moves | If a square would exceed 2 players, every move into it is cancelled (repeats until stable). Swaps are allowed. |
+| Action order | **The declared pass or shot resolves first**, on the board both teams planned against, then every player moves (`turns.actionBeforeMovement`). Defenders cannot change this turn's pass; a player the action relocated (throw-in taker, goal-kick keeper, blocker) keeps that square and its planned move is dropped. No movement after a goal (kick-off reset). `false` restores spec v1.3: move first, then act. |
 | Locks | On its own turn the carrier moves only with the Move option. On the other team's turn it may still move one cell with the ball (`carrier.canMoveOnOpponentTurn`), but never pass or shoot. Pass receiver is locked. |
 | Lane check | Straight pass lane checked at declaration (`revalidateLaneAfterMovement` = false). Any player of either team blocks. |
-| Long pass miss | Lands on one of 8 cells around the receiver. Opponent there → opponent; only teammates → teammate; empty → loose ball; off pitch → restart. |
+| Long pass | Aimed at a teammate **or any square**. On target (1/9): to a teammate as before; into an empty square the ball waits there and whoever moves onto it this turn collects it (two arrivals = 50/50); onto opponents only = theirs; onto both teams = 50/50. Off target: lands on one of the 8 squares around the target (opponent there → opponent; only teammates → teammate; empty → loose; off pitch → restart). A square target does not lock any runner. |
 | Loose ball | Claimed by whoever stands on it after the next movement; two arrivals → random clash. |
-| Tackle | Requested on the move order; happens if the tackler ends on the opposing carrier's square. Resolved before the action; a won tackle cancels the declared action. |
+| Tackle | Requested on the move order; happens if the tackler ends the movement on the square of whoever holds the ball at that point (with the default action-first order, that is the pass receiver or the carrier who kept the ball). A won tackle hands over the ball. |
+| Shot target | The shooter picks one of the goal squares (default: the one in the shooter's row). Keeper distance and the blocking direction are measured toward that square. |
 | Shot blocking | Opposing outfield player on the adjacent cell toward the shot target **at declaration** blocks; blocker gets the ball and is moved back to that cell. |
-| Shot accuracy | Based on columns from the goal line: 100% within the box depth, linear down to 50% at the centre line. |
-| Goalkeeper distance | Chebyshev from the shot target cell to the keeper's cell **after** movement. |
+| Shot accuracy | 100% inside the opponent's penalty box; then 5% less per rectangular ring of squares around the box (95%, 90%, 85% …), never below 30% (`shooting.accuracyDropPerRing`, `shooting.minimumAccuracy`). Rings count in every direction, so wide shots near the goal line lose accuracy too. |
+| Goalkeeper distance | Chebyshev from the shot target cell to the keeper's cell when the shot resolves: before movement by default (the keeper's move this turn comes after the shot), after movement with `actionBeforeMovement = false`. Goal chance by distance: 0 → 5%, 1 → 30%, 2 → 60%, 3+ → 80% (`goalkeeper.goalChanceByDistance`; raised keeper coverage from the spec's 5/50/100% after AI simulations showed ~30 goals per 90 min). |
 | Out of play | Past a goal line → goal kick to that end's keeper (in goal centre). Past a sideline → throw-in for the team that did not touch last; its nearest outfield player is moved to the nearest in-bounds cell. |
 | Kick-off | Coin toss team kicks off and plays the first turn. After a goal both teams reset to formation; conceding team kicks off and plays next. |
-| Clock | Each turn = 2 steps × 30 s. Expiry ends the match after the current step (no new turn). |
+| Clock | Each turn = 2 steps × 30 s, so a 10-minute match is 10 turns in total (not necessarily 5 each when possession decides the turn). Expiry ends the match after the current step (no new turn). |
 | Ties | Golden goal only if both teams pick it (`goldenGoalRequiresBothTeams`). |
+| Goalkeeper movement | Not a match setting: each turn the player moves the keeper 1 or 2 cells (`goalkeeper.maxMoveCells`), inside its own penalty box. |
+| Computer opponent | `BasicStrategy` (Assets/Scripts/Domain/AI): rule-based scoring per spec §12 with a small random factor; reads only the public board, never the other side's hidden plan; always golden goal on a tie. With the ball: shots (accuracy × keeper odds − loss risk), short/long passes (progress, attacking third, receiver pressure), running with the ball. Without: nearest player presses/tackles, others mark goal-side, keeper tracks the ball row; nearest player chases a loose ball. |

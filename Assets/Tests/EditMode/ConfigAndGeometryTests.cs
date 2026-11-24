@@ -136,15 +136,40 @@ namespace FootballBoard.Domain.Tests
             Assert.That(cells, Has.No.Member(new Cell(2, 0)));
         }
 
-        [Test]
-        public void ShotAccuracyFallsLinearlyToCentreLine()
+        // Blue's box (Red attacks it) covers columns 22-25, rows 4-8.
+        [TestCase(22, 6, 1.00)]   // inside the box
+        [TestCase(25, 4, 1.00)]   // inside, on the goal line
+        [TestCase(21, 6, 0.95)]   // first ring, in front
+        [TestCase(21, 3, 0.95)]   // first ring, corner
+        [TestCase(24, 9, 0.95)]   // first ring, beside the box
+        [TestCase(20, 6, 0.90)]   // second ring
+        [TestCase(25, 12, 0.80)]  // fourth ring, out wide on the goal line
+        [TestCase(12, 6, 0.50)]   // tenth ring (centre circle)
+        [TestCase(8, 6, 0.30)]    // 14 rings: floor
+        [TestCase(0, 0, 0.30)]    // own corner: floor
+        public void ShotAccuracyDropsFivePercentPerRingAroundTheBox(int x, int y, double expected)
         {
             var engine = MatchEngine.Create(null, null, new ScriptedRandom());
-            Assert.That(engine.ShotAccuracy(Team.Red, new Cell(22, 6)), Is.EqualTo(1.0));
-            Assert.That(engine.ShotAccuracy(Team.Red, new Cell(21, 6)), Is.EqualTo(1.0 - 0.5 / 9.5).Within(1e-9));
-            Assert.That(engine.ShotAccuracy(Team.Red, new Cell(12, 6)), Is.EqualTo(0.5));
-            Assert.That(engine.ShotAccuracy(Team.Red, new Cell(3, 6)), Is.EqualTo(0.5));
+            Assert.That(engine.ShotAccuracy(Team.Red, new Cell(x, y)), Is.EqualTo(expected).Within(1e-9));
+        }
+
+        [Test]
+        public void BlueShootsAtRedsBox()
+        {
+            var engine = MatchEngine.Create(null, null, new ScriptedRandom());
             Assert.That(engine.ShotAccuracy(Team.Blue, new Cell(3, 6)), Is.EqualTo(1.0));
+            Assert.That(engine.ShotAccuracy(Team.Blue, new Cell(5, 6)), Is.EqualTo(0.90).Within(1e-9));
+        }
+
+        [Test]
+        public void AccuracyFloorAndStepComeFromRules()
+        {
+            var rules = FootballBoard.Domain.Config.RulesConfig.CreateDefault();
+            rules.Shooting.AccuracyDropPerRing = 0.1;
+            rules.Shooting.MinimumAccuracy = 0.5;
+            var engine = MatchEngine.Create(rules, null, new ScriptedRandom());
+            Assert.That(engine.ShotAccuracy(Team.Red, new Cell(20, 6)), Is.EqualTo(0.8).Within(1e-9));
+            Assert.That(engine.ShotAccuracy(Team.Red, new Cell(12, 6)), Is.EqualTo(0.5).Within(1e-9));
         }
 
         [Test]
@@ -152,9 +177,10 @@ namespace FootballBoard.Domain.Tests
         {
             var engine = MatchEngine.Create(null, null, new ScriptedRandom());
             Assert.That(engine.GoalChance(0), Is.EqualTo(0.05));
-            Assert.That(engine.GoalChance(1), Is.EqualTo(0.5));
-            Assert.That(engine.GoalChance(2), Is.EqualTo(1.0));
-            Assert.That(engine.GoalChance(7), Is.EqualTo(1.0));
+            Assert.That(engine.GoalChance(1), Is.EqualTo(0.3));
+            Assert.That(engine.GoalChance(2), Is.EqualTo(0.6));
+            Assert.That(engine.GoalChance(3), Is.EqualTo(0.8));
+            Assert.That(engine.GoalChance(7), Is.EqualTo(0.8));
         }
     }
 }

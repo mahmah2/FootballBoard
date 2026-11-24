@@ -42,15 +42,26 @@ namespace FootballBoard.Domain.Tests
         }
 
         [Test]
-        public void GoalkeeperRangeFollowsMatchSetting()
+        [TestCase(1, 6, true)]
+        [TestCase(2, 6, true)]
+        [TestCase(2, 8, true)]
+        [TestCase(3, 6, false)]
+        public void GoalkeeperChoosesOneOrTwoCellsEachTurn(int x, int y, bool allowed)
         {
-            var one = Create();
-            Arrange(one, Red4);
-            Assert.That(one.SubmitPlan(Team.Red, TeamPlan.Empty().WithMove(RedGk, new Cell(2, 6))).Accepted, Is.False);
+            var e = Create();
+            Arrange(e, Red4);
+            Assert.That(e.SubmitPlan(Team.Red, TeamPlan.Empty().WithMove(RedGk, new Cell(x, y))).Accepted, Is.EqualTo(allowed));
+        }
 
-            var two = Create(settings: new MatchSettings { GoalkeeperMoveCells = 2 });
-            Arrange(two, Red4);
-            Assert.That(two.SubmitPlan(Team.Red, TeamPlan.Empty().WithMove(RedGk, new Cell(2, 6))).Accepted, Is.True);
+        [Test]
+        public void GoalkeeperRangeComesFromRules()
+        {
+            var rules = RulesConfig.CreateDefault();
+            rules.Goalkeeper.MaxMoveCells = 1;
+            var e = Create(rules: rules);
+            Arrange(e, Red4);
+            Assert.That(e.SubmitPlan(Team.Red, TeamPlan.Empty().WithMove(RedGk, new Cell(2, 6))).Accepted, Is.False);
+            Assert.That(e.GetMoveTargets(RedGk), Has.Member(new Cell(1, 6)));
         }
 
         [Test]
@@ -163,15 +174,50 @@ namespace FootballBoard.Domain.Tests
         }
 
         [Test]
-        public void TeamsAlternateAndPlanInOrder()
+        public void TeamWithTheBallKeepsTheTurn()
         {
+            // Planning order R B, R B ... while Red keeps the ball.
             var e = Create();
             Assert.That(e.SubmitPlan(Team.Blue, TeamPlan.Empty()).Accepted, Is.False, "turn team plans first");
+            PlayTurn(e);
+            Assert.That(e.State.TurnTeam, Is.EqualTo(Team.Red));
+            PlayTurn(e);
+            Assert.That(e.State.TurnTeam, Is.EqualTo(Team.Red));
+            Assert.That(e.State.TurnNumber, Is.EqualTo(3));
+        }
+
+        [Test]
+        public void TurnPassesToTheTeamThatWinsTheBall()
+        {
+            var e = Create(new ScriptedRandom(0.3));
+            Arrange(e, Red2, (Red2, 12, 6), (Blue2, 13, 6));
+            PlayTurn(e, null, TeamPlan.Empty().WithMove(Blue2, new Cell(12, 6), tackle: true));
+            Assert.That(e.State.PossessionTeam, Is.EqualTo(Team.Blue));
+            Assert.That(e.State.TurnTeam, Is.EqualTo(Team.Blue));
+            Assert.That(e.State.PlanningTeam, Is.EqualTo(Team.Blue));
+        }
+
+        [Test]
+        public void LooseBallDoesNotSwitchTheTurn()
+        {
+            var e = Create();
+            Arrange(e, Red2);
+            e.ForceLooseBall(new Cell(12, 3));
+            PlayTurn(e);
+            Assert.That(e.State.TurnTeam, Is.EqualTo(Team.Red));
+            Assert.That(e.State.PlanningTeam, Is.EqualTo(Team.Red));
+        }
+
+        [Test]
+        public void StrictAlternationCanBeRestoredInConfig()
+        {
+            var rules = RulesConfig.CreateDefault();
+            rules.Turns.PossessionTeamPlaysFirst = false;
+            var e = Create(rules: rules);
             PlayTurn(e);
             Assert.That(e.State.TurnTeam, Is.EqualTo(Team.Blue));
             PlayTurn(e);
             Assert.That(e.State.TurnTeam, Is.EqualTo(Team.Red));
-            Assert.That(e.State.TurnNumber, Is.EqualTo(3));
         }
 
         [Test]
@@ -221,7 +267,7 @@ namespace FootballBoard.Domain.Tests
         [Test]
         public void GoldenGoalEndsMatchOnNextGoal()
         {
-            var e = Create();
+            var e = Create(new ScriptedRandom(0.1));
             e.ForceElapsed(540);
             PlayTurn(e);
             e.SubmitTieChoice(Team.Red, TieChoice.GoldenGoal);

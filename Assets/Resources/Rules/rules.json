@@ -31,11 +31,10 @@
   },
 
   "goalkeeper": {
-    "defaultMoveCells": 1,       // cells per turn, inside the own penalty box only
-    "allowedMoveCells": [1, 2],  // what the players may pick on the match-setup screen
+    "maxMoveCells": 2,           // the player picks 1 or 2 cells each turn; always inside the own penalty box
     // Goal chance for an on-target shot by distance from target cell to keeper
     // (index 0 = same cell, 1 = one cell away, last value = that distance or more).
-    "goalChanceByDistance": [0.05, 0.5, 1.0]
+    "goalChanceByDistance": [0.05, 0.3, 0.6, 0.8]
   },
 
   "passing": {
@@ -47,8 +46,9 @@
   },
 
   "shooting": {
-    "accuracyInsideBox": 1.0,          // chance the shot is on target within penaltyBoxDepth of the goal line
-    "accuracyAtCentreLine": 0.5,       // falls in a straight line from the box edge to the centre line, then stays
+    "accuracyInsideBox": 1.0,          // chance the shot is on target from inside the opponent's penalty box
+    "accuracyDropPerRing": 0.05,       // minus 5% for each ring of squares around the box: 95%, 90%, 85%, ...
+    "minimumAccuracy": 0.3,            // never below 30%
     "contestedShooterWinChance": 0.5   // opponent on the shooter's square
   },
 
@@ -65,6 +65,11 @@
     "secondsPerStep": 30,              // a team turn = arrangement step + action step
     "defaultMinutes": 10,
     "presetMinutes": [10, 20, 30, 40, 50, 60, 70, 90]
+  },
+
+  "turns": {
+    "possessionTeamPlaysFirst": true,  // the team with the ball takes every turn until it loses it (false = strict alternation)
+    "actionBeforeMovement": true       // the pass/shot resolves first, then all players move (false = move first, then act)
   },
 
   "ties": {

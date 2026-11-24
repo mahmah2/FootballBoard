@@ -45,6 +45,21 @@ namespace FootballBoard.Domain
         public bool InPenaltyBox(Team owner, Cell c) =>
             InBounds(c) && DistanceFromGoalLine(owner, c) < BoxDepth && c.Y >= BoxTop && c.Y <= BoxBottom;
 
+        /// <summary>
+        /// 0 inside the penalty box of <paramref name="owner"/>; otherwise which rectangular ring around
+        /// the box the cell is on (1 = the squares touching the box, 2 = the next ring, ...).
+        /// </summary>
+        public int RingsOutsidePenaltyBox(Team owner, Cell c)
+        {
+            var lineX = GoalLineX(owner);
+            var nearX = lineX;
+            var farX = owner == Team.Red ? lineX + BoxDepth - 1 : lineX - (BoxDepth - 1);
+            int minX = Math.Min(nearX, farX), maxX = Math.Max(nearX, farX);
+            var dx = c.X < minX ? minX - c.X : c.X > maxX ? c.X - maxX : 0;
+            var dy = c.Y < BoxTop ? BoxTop - c.Y : c.Y > BoxBottom ? c.Y - BoxBottom : 0;
+            return Math.Max(dx, dy);
+        }
+
         public bool InOwnHalf(Team team, Cell c) =>
             InBounds(c) && (team == Team.Red ? c.X < Columns / 2 : c.X >= Columns / 2);
 

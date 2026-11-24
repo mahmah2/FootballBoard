@@ -17,12 +17,19 @@ namespace FootballBoard.Domain
         public CarrierOption Option { get; set; }
         public int? ReceiverId { get; set; }
 
+        /// <summary>
+        /// Long pass: a square to play the ball into (instead of a receiver). Shot: the goal square
+        /// to aim at (null aims at the goal square in the shooter's row).
+        /// </summary>
+        public Cell? TargetCell { get; set; }
+
         public static CarrierAction Move() => new CarrierAction { Option = CarrierOption.Move };
         public static CarrierAction StraightPass(int receiverId) => new CarrierAction { Option = CarrierOption.StraightPass, ReceiverId = receiverId };
         public static CarrierAction LongPass(int receiverId) => new CarrierAction { Option = CarrierOption.LongPass, ReceiverId = receiverId };
-        public static CarrierAction Shot() => new CarrierAction { Option = CarrierOption.Shot };
+        public static CarrierAction Shot(Cell? target = null) => new CarrierAction { Option = CarrierOption.Shot, TargetCell = target };
+        public static CarrierAction LongPassTo(Cell target) => new CarrierAction { Option = CarrierOption.LongPass, TargetCell = target };
 
-        internal CarrierAction Copy() => new CarrierAction { Option = Option, ReceiverId = ReceiverId };
+        internal CarrierAction Copy() => new CarrierAction { Option = Option, ReceiverId = ReceiverId, TargetCell = TargetCell };
     }
 
     public sealed class MoveOrder

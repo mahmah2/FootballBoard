@@ -23,6 +23,7 @@ namespace FootballBoard.Domain.Config
         public TackleRules Tackle { get; set; } = new TackleRules();
         public ClockRules Clock { get; set; } = new ClockRules();
         public TieRules Ties { get; set; } = new TieRules();
+        public TurnRules Turns { get; set; } = new TurnRules();
 
         public static RulesConfig CreateDefault() => new RulesConfig();
 
@@ -33,9 +34,9 @@ namespace FootballBoard.Domain.Config
             if (SchemaVersion != CurrentSchemaVersion)
                 e.Add($"schemaVersion must be {CurrentSchemaVersion} (found {SchemaVersion}).");
             if (Board == null || Teams == null || Goalkeeper == null || Passing == null ||
-                Shooting == null || Carrier == null || Tackle == null || Clock == null || Ties == null)
+                Shooting == null || Carrier == null || Tackle == null || Clock == null || Ties == null || Turns == null)
             {
-                e.Add("All sections (board, teams, goalkeeper, passing, shooting, carrier, tackle, clock, ties) must be objects, not null.");
+                e.Add("All sections (board, teams, goalkeeper, passing, shooting, carrier, tackle, clock, ties, turns) must be objects, not null.");
                 return e;
             }
 
@@ -159,31 +160,21 @@ namespace FootballBoard.Domain.Config
 
     public sealed class GoalkeeperRules
     {
-        /// <summary>Cells per turn a goalkeeper may move when the match setup does not choose.</summary>
-        public int DefaultMoveCells { get; set; } = 1;
-
-        /// <summary>Values the players may choose from before a match.</summary>
-        public List<int> AllowedMoveCells { get; set; } = new List<int> { 1, 2 };
+        /// <summary>
+        /// Furthest a goalkeeper may move in one turn (inside its own penalty box). The player
+        /// chooses each turn how far to go, from 1 up to this value.
+        /// </summary>
+        public int MaxMoveCells { get; set; } = 2;
 
         /// <summary>
         /// Goal probability indexed by the distance from the shot target to the goalkeeper.
         /// The last entry is used for every larger distance.
         /// </summary>
-        public List<double> GoalChanceByDistance { get; set; } = new List<double> { 0.05, 0.5, 1.0 };
+        public List<double> GoalChanceByDistance { get; set; } = new List<double> { 0.05, 0.3, 0.6, 0.8 };
 
         internal void Validate(List<string> e, BoardRules board)
         {
-            if (AllowedMoveCells == null || AllowedMoveCells.Count == 0)
-            {
-                e.Add("goalkeeper.allowedMoveCells must contain at least one value.");
-            }
-            else
-            {
-                foreach (var v in AllowedMoveCells)
-                    RulesConfig.CheckRange(e, "goalkeeper.allowedMoveCells[]", v, 1, Math.Max(1, board.PenaltyBoxWidth));
-                if (!AllowedMoveCells.Contains(DefaultMoveCells))
-                    e.Add("goalkeeper.defaultMoveCells must be one of goalkeeper.allowedMoveCells.");
-            }
+            RulesConfig.CheckRange(e, "goalkeeper.maxMoveCells", MaxMoveCells, 1, Math.Max(1, board.PenaltyBoxWidth));
 
             if (GoalChanceByDistance == null || GoalChanceByDistance.Count == 0)
             {
@@ -227,11 +218,17 @@ namespace FootballBoard.Domain.Config
 
     public sealed class ShootingRules
     {
-        /// <summary>Chance the shot is on target from inside the penalty-box depth.</summary>
+        /// <summary>Chance the shot is on target from inside the opponent's penalty box.</summary>
         public double AccuracyInsideBox { get; set; } = 1.0;
 
-        /// <summary>Accuracy at (and beyond) the centre line. Falls linearly from the box edge.</summary>
-        public double AccuracyAtCentreLine { get; set; } = 0.5;
+        /// <summary>
+        /// Accuracy lost for each ring of squares around the penalty box (first ring outside the box
+        /// = one drop, second ring = two drops, ...).
+        /// </summary>
+        public double AccuracyDropPerRing { get; set; } = 0.05;
+
+        /// <summary>Accuracy never falls below this, however far out the shot is.</summary>
+        public double MinimumAccuracy { get; set; } = 0.3;
 
         /// <summary>Chance the shooter wins when an opponent shares the shooter's square.</summary>
         public double ContestedShooterWinChance { get; set; } = 0.5;
@@ -239,11 +236,29 @@ namespace FootballBoard.Domain.Config
         internal void Validate(List<string> e)
         {
             RulesConfig.CheckProbability(e, "shooting.accuracyInsideBox", AccuracyInsideBox);
-            RulesConfig.CheckProbability(e, "shooting.accuracyAtCentreLine", AccuracyAtCentreLine);
+            RulesConfig.CheckProbability(e, "shooting.accuracyDropPerRing", AccuracyDropPerRing);
+            RulesConfig.CheckProbability(e, "shooting.minimumAccuracy", MinimumAccuracy);
             RulesConfig.CheckProbability(e, "shooting.contestedShooterWinChance", ContestedShooterWinChance);
-            if (AccuracyAtCentreLine > AccuracyInsideBox)
-                e.Add("shooting.accuracyAtCentreLine must not be greater than shooting.accuracyInsideBox.");
+            if (MinimumAccuracy > AccuracyInsideBox)
+                e.Add("shooting.minimumAccuracy must not be greater than shooting.accuracyInsideBox.");
         }
+    }
+
+    public sealed class TurnRules
+    {
+        /// <summary>
+        /// True: the team holding the ball takes each turn (plans first and may pass or shoot), so
+        /// the order is B R, B R... until the other team actually owns the ball. While the ball is loose
+        /// the turn stays with the team that had it. False: teams simply alternate turns (spec v1.3).
+        /// </summary>
+        public bool PossessionTeamPlaysFirst { get; set; } = true;
+
+        /// <summary>
+        /// True: the declared pass or shot resolves first, on the board both teams planned against,
+        /// and then every player moves (so defenders cannot step into this turn's pass). False: spec
+        /// v1.3 order, movement first and the action against the final positions.
+        /// </summary>
+        public bool ActionBeforeMovement { get; set; } = true;
     }
 
     public sealed class CarrierRules

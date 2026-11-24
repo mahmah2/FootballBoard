@@ -31,7 +31,9 @@ namespace FootballBoard.Domain
         /// <summary>Long pass missed and landed on an empty cell; the ball is loose.</summary>
         LooseBall,
         /// <summary>Long pass missed and left the pitch; a restart follows.</summary>
-        OutOfPlay
+        OutOfPlay,
+        /// <summary>Accurate long pass into an empty square; the ball waits there for whoever reaches it.</summary>
+        ReachedSquare
     }
 
     public enum ShotOutcome { Blocked, LostContest, Missed, Saved, Goal }
@@ -117,7 +119,10 @@ namespace FootballBoard.Domain
     {
         public PassKind Kind { get; }
         public int PasserId { get; }
-        public int ReceiverId { get; }
+        /// <summary>The intended receiver, or null for a long pass into a square.</summary>
+        public int? ReceiverId { get; }
+        /// <summary>The square aimed at (long passes), or null.</summary>
+        public Cell? TargetCell { get; }
         public PassOutcome Outcome { get; }
         /// <summary>Player holding the ball afterwards, or null if loose / out of play.</summary>
         public int? NewOwnerId { get; }
@@ -126,9 +131,9 @@ namespace FootballBoard.Domain
         public bool Contested { get; }
         public override bool IsRandomized => Kind == PassKind.Long || Contested;
 
-        public PassResolved(PassKind kind, int passerId, int receiverId, PassOutcome outcome, int? newOwnerId, Cell ballCell, bool contested)
+        public PassResolved(PassKind kind, int passerId, int? receiverId, PassOutcome outcome, int? newOwnerId, Cell ballCell, bool contested, Cell? targetCell = null)
         {
-            Kind = kind; PasserId = passerId; ReceiverId = receiverId; Outcome = outcome;
+            Kind = kind; PasserId = passerId; ReceiverId = receiverId; Outcome = outcome; TargetCell = targetCell;
             NewOwnerId = newOwnerId; BallCell = ballCell; Contested = contested;
         }
     }

@@ -215,6 +215,14 @@ namespace FootballBoard.Presentation
             }
         }
 
+        /// <summary>Adds a dropdown above the overlay's buttons (call after <see cref="ShowOverlay"/>).</summary>
+        public void AddOverlayDropdown(string name, int position, List<string> options, int selected, Action<int> onChanged)
+        {
+            var dropdown = UiFactory.Dropdown(_overlayButtons, name, options, selected, onChanged);
+            UiFactory.Preferred(dropdown, 700, 88);
+            dropdown.transform.SetSiblingIndex(position);
+        }
+
         public void HideOverlay() => _overlay.gameObject.SetActive(false);
     }
 }

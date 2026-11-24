@@ -83,6 +83,14 @@ namespace FootballBoard.Domain.Tests
 
         public static Cell Pos(MatchEngine engine, int id) => engine.State.GetPlayer(id).Position;
 
+        /// <summary>Spec v1.3 order: everyone moves first, then the declared pass or shot.</summary>
+        public static RulesConfig MoveFirstRules()
+        {
+            var rules = RulesConfig.CreateDefault();
+            rules.Turns.ActionBeforeMovement = false;
+            return rules;
+        }
+
         public static string FindRulesFile()
         {
             foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })

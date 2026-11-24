@@ -45,6 +45,7 @@ namespace FootballBoard.Domain.Tests
         {
             var rules = RulesConfig.CreateDefault();
             rules.Passing.RevalidateLaneAfterMovement = true;
+            rules.Turns.ActionBeforeMovement = false;
             var e = Create(rules: rules);
             Arrange(e, Red2, (Red2, 10, 6), (Red3, 16, 6), (Blue2, 13, 7));
             var r = PlayTurn(e, Pass(Red3), TeamPlan.Empty().WithMove(Blue2, new Cell(13, 6)));
@@ -107,8 +108,9 @@ namespace FootballBoard.Domain.Tests
             Assert.That(e.State.Ball.IsLoose, Is.True);
             Assert.That(e.State.BallPosition, Is.EqualTo(new Cell(16, 7)));
 
-            // Blue's turn: Blue2 reaches the ball alone.
-            r = PlayTurn(e, TeamPlan.Empty().WithMove(Blue2, new Cell(16, 7)));
+            // Still Red's turn (the ball is loose, nobody owns it): Blue2 reaches the ball alone.
+            r = PlayTurn(e, TeamPlan.Empty(), TeamPlan.Empty().WithMove(Blue2, new Cell(16, 7)));
+            Assert.That(e.State.TurnTeam, Is.EqualTo(Team.Blue), "Blue owns the ball now, so Blue plans first");
             Assert.That(Single<LooseBallClaimed>(r).PlayerId, Is.EqualTo(Blue2));
             Assert.That(e.State.BallCarrier.Id, Is.EqualTo(Blue2));
         }
@@ -119,7 +121,7 @@ namespace FootballBoard.Domain.Tests
             var e = Create(new ScriptedRandom(0.5, ScriptedRandom.Index(6, 8), 0.2));
             Arrange(e, Red2, (Red2, 10, 6), (Red3, 16, 6), (Blue2, 17, 8));
             PlayTurn(e, Long(Red3));
-            var r = PlayTurn(e, TeamPlan.Empty().WithMove(Blue2, new Cell(16, 7)), TeamPlan.Empty().WithMove(Red3, new Cell(16, 7)));
+            var r = PlayTurn(e, TeamPlan.Empty().WithMove(Red3, new Cell(16, 7)), TeamPlan.Empty().WithMove(Blue2, new Cell(16, 7)));
             var claim = Single<LooseBallClaimed>(r);
             Assert.That(claim.IsRandomized, Is.True);
             Assert.That(claim.Contenders, Is.EquivalentTo(new[] { Red3, Blue2 }));
@@ -160,9 +162,9 @@ namespace FootballBoard.Domain.Tests
         private static TeamPlan Shoot() => TeamPlan.Empty().WithAction(CarrierAction.Shot());
 
         [Test]
-        public void KeeperTwoCellsAwayMeansGoalAndConcedingTeamKicksOff()
+        public void KeeperTwoCellsAwayIsSixtyPercentAndConcedingTeamKicksOff()
         {
-            var e = Create();
+            var e = Create(new ScriptedRandom(0.1));
             Arrange(e, Red2, (Red2, 22, 4));
             var r = PlayTurn(e, Shoot());
             Assert.That(Single<ShotResolved>(r).Outcome, Is.EqualTo(ShotOutcome.Goal));
@@ -176,7 +178,7 @@ namespace FootballBoard.Domain.Tests
         [Test]
         public void ConcedingTeamKeepsTheTurnAfterScoringBack()
         {
-            var e = Create();
+            var e = Create(new ScriptedRandom(0.1, 0.1));
             Arrange(e, Red2, (Red2, 22, 4));
             PlayTurn(e, Shoot());                 // Red scores, Blue restarts
             Arrange(e, Blue2, (Blue2, 3, 4));
@@ -198,19 +200,19 @@ namespace FootballBoard.Domain.Tests
         }
 
         [Test]
-        public void KeeperOneCellAwayIsFiftyFifty()
+        public void KeeperOneCellAwayIsThirtyPercent()
         {
-            var e = Create(new ScriptedRandom(0.4));
+            var e = Create(new ScriptedRandom(0.2));
             Arrange(e, Red2, (Red2, 22, 5));
             var shot = Single<ShotResolved>(PlayTurn(e, Shoot()));
-            Assert.That(shot.GoalChance, Is.EqualTo(0.5));
+            Assert.That(shot.GoalChance, Is.EqualTo(0.3));
             Assert.That(shot.Outcome, Is.EqualTo(ShotOutcome.Goal));
         }
 
         [Test]
         public void KeeperPositionIsTakenAfterMovement()
         {
-            var e = Create(new ScriptedRandom(0.5));
+            var e = Create(new ScriptedRandom(0.5), MoveFirstRules());
             Arrange(e, Red2, (Red2, 22, 5));
             var r = PlayTurn(e, Shoot(), TeamPlan.Empty().WithMove(BlueGk, new Cell(25, 5)));
             Assert.That(Single<ShotResolved>(r).Outcome, Is.EqualTo(ShotOutcome.Saved));
@@ -232,7 +234,7 @@ namespace FootballBoard.Domain.Tests
         [Test]
         public void AdjacentDefenderAtDeclarationBlocksAndIsMovedBack()
         {
-            var e = Create();
+            var e = Create(rules: MoveFirstRules());
             Arrange(e, Red2, (Red2, 20, 6), (Blue2, 21, 6));
             var r = PlayTurn(e, Shoot(), TeamPlan.Empty().WithMove(Blue2, new Cell(21, 7)));
             var shot = Single<ShotResolved>(r);
@@ -254,7 +256,7 @@ namespace FootballBoard.Domain.Tests
         [Test]
         public void OpponentOnShootersSquareContestsTheShot()
         {
-            var e = Create(new ScriptedRandom(0.6));
+            var e = Create(new ScriptedRandom(0.6), MoveFirstRules());
             Arrange(e, Red2, (Red2, 22, 4), (Blue2, 21, 3));
             var r = PlayTurn(e, Shoot(), TeamPlan.Empty().WithMove(Blue2, new Cell(22, 4)));
             Assert.That(Single<ShotResolved>(r).Outcome, Is.EqualTo(ShotOutcome.LostContest));
@@ -267,7 +269,7 @@ namespace FootballBoard.Domain.Tests
         [Test]
         public void SuccessfulTackleWinsBallAndCancelsDeclaredAction()
         {
-            var e = Create(new ScriptedRandom(0.3));
+            var e = Create(new ScriptedRandom(0.3), MoveFirstRules());
             Arrange(e, Red2, (Red2, 12, 6), (Red3, 12, 2), (Blue2, 13, 6));
             var r = PlayTurn(e,
                 TeamPlan.Empty().WithAction(CarrierAction.StraightPass(Red3)),
@@ -280,7 +282,7 @@ namespace FootballBoard.Domain.Tests
         [Test]
         public void FailedTackleLetsTheActionHappen()
         {
-            var e = Create(new ScriptedRandom(0.7));
+            var e = Create(new ScriptedRandom(0.7), MoveFirstRules());
             Arrange(e, Red2, (Red2, 12, 6), (Red3, 12, 2), (Blue2, 13, 6));
             var r = PlayTurn(e,
                 TeamPlan.Empty().WithAction(CarrierAction.StraightPass(Red3)),
