@@ -14,16 +14,26 @@ namespace FootballBoard.Presentation
         public event Action ConfirmClicked;
         public event Action ClearClicked;
         public event Action FitClicked;
+        public event Action MenuClicked;
 
         private TextMeshProUGUI _redScore, _blueScore, _clock, _status, _message, _bannerTitle, _bannerSub;
         private TextMeshProUGUI _overlayTitle, _overlaySub;
-        private RectTransform _optionsRow, _overlay, _overlayButtons, _banner;
+        private RectTransform _optionsRow, _overlay, _overlayButtons, _banner, _pause, _pauseButtons, _menuButton;
         private UnityEngine.UI.Image _overlayImage;
         private UnityEngine.UI.Button _confirm;
         private readonly Dictionary<CarrierOption, UnityEngine.UI.Button> _options = new Dictionary<CarrierOption, UnityEngine.UI.Button>();
         private Coroutine _messageFade;
+        private Team? _pulseTeam;
+        private float _pulseStart;
+
+        /// <summary>Seconds for one full fade out and back in of the planning team's score.</summary>
+        private const float PulsePeriod = 1.6f;
+        private const float PulseMinAlpha = 0.25f;
+
+        public CutscenePlayer Cutscenes { get; private set; }
 
         public bool OverlayVisible => _overlay.gameObject.activeSelf;
+        public bool PauseVisible => _pause.gameObject.activeSelf;
 
         public void Build()
         {
@@ -41,7 +51,11 @@ namespace FootballBoard.Presentation
             BuildTopBar(root);
             BuildBottomBar(root);
             BuildBanner(root);
+            Cutscenes = gameObject.AddComponent<CutscenePlayer>();
+            Cutscenes.Build(root);
             BuildOverlay(root);
+            _menuButton.SetAsLastSibling(); // reachable from the hot-seat handover screens too
+            BuildPause(root);
         }
 
         private void BuildTopBar(Transform root)
@@ -66,6 +80,13 @@ namespace FootballBoard.Presentation
             fitRt.anchorMin = fitRt.anchorMax = fitRt.pivot = new Vector2(1, 1);
             fitRt.anchoredPosition = new Vector2(-24, -116);
             fitRt.sizeDelta = new Vector2(110, 60);
+
+            var menu = UiFactory.Button(root, "MenuButton", "MENU", Palette.PanelDark, Palette.Chalk, () => MenuClicked?.Invoke(), 24);
+            _menuButton = (RectTransform)menu.transform;
+            _menuButton.anchorMin = _menuButton.anchorMax = _menuButton.pivot = new Vector2(0, 1);
+            _menuButton.anchoredPosition = new Vector2(24, -116);
+            _menuButton.sizeDelta = new Vector2(130, 60);
+            _menuButton.gameObject.SetActive(false);
         }
 
         private void BuildBottomBar(Transform root)
@@ -110,21 +131,82 @@ namespace FootballBoard.Presentation
         {
             _overlay = UiFactory.Stretch("Overlay", root);
             _overlayImage = UiFactory.Panel(_overlay, Palette.PanelOpaque);
-            var title = UiFactory.Rect("Title", _overlay, new Vector2(0, 0.58f), new Vector2(1, 0.8f), new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero);
-            _overlayTitle = UiFactory.Label(title, "", 84, Palette.Accent);
-            var sub = UiFactory.Rect("Subtitle", _overlay, new Vector2(0.1f, 0.42f), new Vector2(0.9f, 0.58f), new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero);
-            _overlaySub = UiFactory.Label(sub, "", 34, Palette.Chalk);
-            _overlayButtons = UiFactory.Rect("Buttons", _overlay, new Vector2(0.5f, 0.12f), new Vector2(0.5f, 0.4f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1200, 0));
-            var column = _overlayButtons.gameObject.AddComponent<UnityEngine.UI.VerticalLayoutGroup>();
-            column.spacing = 18;
-            column.childAlignment = TextAnchor.MiddleCenter;
-            column.childControlWidth = column.childControlHeight = true;
-            column.childForceExpandWidth = true;
-            column.childForceExpandHeight = false;
+            var column = CentredColumn(_overlay, 1400);
+            _overlayTitle = UiFactory.Label(column, "", 84, Palette.Accent);
+            UiFactory.Preferred(_overlayTitle, 1400, 110);
+            _overlaySub = UiFactory.Label(column, "", 34, Palette.Chalk);
+            _overlayButtons = ButtonColumn(column);
             _overlay.gameObject.SetActive(false);
         }
 
+        private void BuildPause(Transform root)
+        {
+            _pause = UiFactory.Stretch("PauseMenu", root);
+            UiFactory.Panel(_pause, Palette.PanelOpaque);
+            var column = CentredColumn(_pause, 1000);
+            var title = UiFactory.Label(column, "PAUSED", 84, Palette.Accent);
+            UiFactory.Preferred(title, 1000, 110);
+            _pauseButtons = ButtonColumn(column);
+            _pause.gameObject.SetActive(false);
+        }
+
+        /// <summary>
+        /// A column centred on the screen that grows to fit its children, so panels stay centred on
+        /// any aspect ratio (a wide phone is much shorter than a 16:9 monitor in canvas units).
+        /// </summary>
+        private static RectTransform CentredColumn(RectTransform parent, float width)
+        {
+            var column = UiFactory.Rect("Column", parent, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(width, 0));
+            var layout = column.gameObject.AddComponent<UnityEngine.UI.VerticalLayoutGroup>();
+            layout.spacing = 28;
+            layout.childAlignment = TextAnchor.MiddleCenter;
+            layout.childControlWidth = layout.childControlHeight = true;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+            var fitter = column.gameObject.AddComponent<UnityEngine.UI.ContentSizeFitter>();
+            fitter.verticalFit = UnityEngine.UI.ContentSizeFitter.FitMode.PreferredSize;
+            return column;
+        }
+
+        private static RectTransform ButtonColumn(RectTransform parent)
+        {
+            var buttons = UiFactory.Rect("Buttons", parent, Vector2.zero, Vector2.one, new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero);
+            var layout = buttons.gameObject.AddComponent<UnityEngine.UI.VerticalLayoutGroup>();
+            layout.spacing = 18;
+            layout.childAlignment = TextAnchor.MiddleCenter;
+            layout.childControlWidth = layout.childControlHeight = true;
+            layout.childForceExpandWidth = false;
+            layout.childForceExpandHeight = false;
+            return buttons;
+        }
+
         // ------------------------------------------------------------------ HUD state
+
+        /// <summary>Fades the planning team's name in and out; null stops it.</summary>
+        public void SetPlanningTeam(Team? team)
+        {
+            if (team == _pulseTeam) return;
+            _pulseTeam = team;
+            _pulseStart = Time.unscaledTime;
+            SetAlpha(_redScore, 1f);
+            SetAlpha(_blueScore, 1f);
+        }
+
+        private void Update()
+        {
+            if (!_pulseTeam.HasValue || _redScore == null) return;
+            // Cosine ease: starts fully visible, glides down to the minimum and back up.
+            var phase = (Time.unscaledTime - _pulseStart) / PulsePeriod * Mathf.PI * 2f;
+            var alpha = Mathf.Lerp(PulseMinAlpha, 1f, 0.5f + 0.5f * Mathf.Cos(phase));
+            SetAlpha(_pulseTeam == Team.Red ? _redScore : _blueScore, alpha);
+        }
+
+        private static void SetAlpha(TextMeshProUGUI label, float alpha)
+        {
+            var c = label.color;
+            c.a = alpha;
+            label.color = c;
+        }
 
         public void SetScore(int red, int blue)
         {
@@ -155,11 +237,13 @@ namespace FootballBoard.Presentation
             _message.text = "";
         }
 
-        /// <summary>Shows the carrier options (only when the planning team holds the ball on its own turn).</summary>
+        /// <summary>Shows the plan buttons; the carrier options only while the ball carrier is selected.</summary>
         public void SetPlanControls(bool visible, bool showOptions, CarrierOption selected)
         {
             _optionsRow.parent.gameObject.SetActive(visible);
             _optionsRow.gameObject.SetActive(showOptions);
+            // Without the options the bar's backing panel goes too, leaving only CLEAR/CONFIRM over the pitch.
+            _optionsRow.parent.GetComponent<UnityEngine.UI.Image>().enabled = showOptions;
             foreach (var pair in _options)
             {
                 var active = pair.Key == selected;
@@ -224,5 +308,34 @@ namespace FootballBoard.Presentation
         }
 
         public void HideOverlay() => _overlay.gameObject.SetActive(false);
+
+        /// <summary>The in-match MENU button (hidden on the main menu and at full time).</summary>
+        public void SetMenuButtonVisible(bool visible) => _menuButton.gameObject.SetActive(visible);
+
+        public void ShowPause(Action onResume, Action onEndMatch)
+        {
+            _pause.gameObject.SetActive(true);
+            UiFactory.ClearChildren(_pauseButtons);
+            foreach (var (label, onClick, primary) in new (string, Action, bool)[] { ("RESUME", onResume, true), ("END MATCH", onEndMatch, false) })
+            {
+                var button = UiFactory.Button(_pauseButtons, label.Replace(" ", "") + "Button", label,
+                    primary ? Palette.Accent : Palette.Shadow, primary ? Palette.Shadow : Palette.Chalk, () => onClick(), 34);
+                UiFactory.Preferred(button, 700, 88);
+            }
+        }
+
+        public void HidePause() => _pause.gameObject.SetActive(false);
+
+        /// <summary>Clears transient match UI (banner, message, plan controls) when a match is abandoned.</summary>
+        public void ResetMatchUi()
+        {
+            StopAllCoroutines();
+            _banner.gameObject.SetActive(false);
+            Cutscenes.Hide();
+            _message.text = "";
+            SetStatus("", Palette.Chalk);
+            SetPlanningTeam(null);
+            SetPlanControls(false, false, CarrierOption.Move);
+        }
     }
 }

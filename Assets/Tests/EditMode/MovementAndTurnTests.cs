@@ -64,6 +64,46 @@ namespace FootballBoard.Domain.Tests
             Assert.That(e.GetMoveTargets(RedGk), Has.Member(new Cell(1, 6)));
         }
 
+        // Red's box is columns 0-3, rows 4-8; the first ring is column 4 and rows 3 / 9.
+        [TestCase(2, 6, 1)]   // ball inside the box
+        [TestCase(4, 6, 1)]   // first ring, in front
+        [TestCase(4, 3, 1)]   // first ring, corner
+        [TestCase(5, 6, 2)]   // second ring: full range
+        [TestCase(12, 6, 2)]  // far away
+        public void GoalkeeperIsLimitedToOneCellWhileTheBallIsNear(int ballX, int ballY, int expectedRange)
+        {
+            var e = Create(turn: Team.Blue);
+            Arrange(e, Blue2, (Blue2, ballX, ballY));
+            Assert.That(e.GoalkeeperRange(e.State.GetPlayer(RedGk)), Is.EqualTo(expectedRange));
+            Assert.That(e.GetMoveTargets(RedGk).Max(c => c.DistanceTo(new Cell(0, 6))), Is.EqualTo(expectedRange));
+            var twoCells = e.SubmitPlan(Team.Blue, TeamPlan.Empty()).Accepted
+                && e.SubmitPlan(Team.Red, TeamPlan.Empty().WithMove(RedGk, new Cell(2, 6))).Accepted;
+            Assert.That(twoCells, Is.EqualTo(expectedRange == 2));
+        }
+
+        [Test]
+        public void NearBallLimitCanBeTurnedOff()
+        {
+            var rules = RulesConfig.CreateDefault();
+            rules.Goalkeeper.NearBallRings = -1;
+            var e = Create(rules: rules, turn: Team.Blue);
+            Arrange(e, Blue2, (Blue2, 3, 6));
+            Assert.That(e.GoalkeeperRange(e.State.GetPlayer(RedGk)), Is.EqualTo(2));
+        }
+
+        [Test]
+        public void KeeperMoveIsNotCancelledWhenTheShotBringsTheBallNear()
+        {
+            // Planned from far away (range 2); the save puts the ball in the keeper's hands in the box.
+            var e = Create(new ScriptedRandom(0.1, 0.9));
+            Arrange(e, Red4, (Red4, 14, 6));
+            var result = PlayTurn(e,
+                TeamPlan.Empty().WithAction(CarrierAction.Shot(new Cell(25, 6))),
+                TeamPlan.Empty().WithMove(BlueGk, new Cell(23, 6)));
+            Assert.That(Single<ShotResolved>(result).Outcome, Is.EqualTo(ShotOutcome.Saved));
+            Assert.That(Pos(e, BlueGk), Is.EqualTo(new Cell(23, 6)));
+        }
+
         [Test]
         public void CarrierMovesOnlyWithMoveOption()
         {

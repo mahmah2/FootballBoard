@@ -166,15 +166,33 @@ namespace FootballBoard.Domain.Config
         /// </summary>
         public int MaxMoveCells { get; set; } = 2;
 
+        /// <summary>Goalkeeper range while the ball is near its box (see <see cref="NearBallRings"/>).</summary>
+        public int MaxMoveCellsWhenBallNear { get; set; } = 1;
+
+        /// <summary>
+        /// The ball counts as near when it is inside the keeper's penalty box or within this many rings
+        /// of squares around it (1 = the squares touching the box). -1 turns the limit off.
+        /// </summary>
+        public int NearBallRings { get; set; } = 1;
+
         /// <summary>
         /// Goal probability indexed by the distance from the shot target to the goalkeeper.
         /// The last entry is used for every larger distance.
         /// </summary>
         public List<double> GoalChanceByDistance { get; set; } = new List<double> { 0.05, 0.3, 0.6, 0.8 };
 
+        /// <summary>
+        /// Furthest a goalkeeper can dive to reach a shot: an on-target shot aimed further than this
+        /// many squares from the keeper is always a goal. -1 = no limit (the table decides).
+        /// </summary>
+        public int DiveReachCells { get; set; } = 2;
+
         internal void Validate(List<string> e, BoardRules board)
         {
             RulesConfig.CheckRange(e, "goalkeeper.maxMoveCells", MaxMoveCells, 1, Math.Max(1, board.PenaltyBoxWidth));
+            RulesConfig.CheckRange(e, "goalkeeper.maxMoveCellsWhenBallNear", MaxMoveCellsWhenBallNear, 1, Math.Max(1, board.PenaltyBoxWidth));
+            RulesConfig.CheckRange(e, "goalkeeper.nearBallRings", NearBallRings, -1, Math.Max(board.Rows, board.Columns));
+            RulesConfig.CheckRange(e, "goalkeeper.diveReachCells", DiveReachCells, -1, Math.Max(board.Rows, board.Columns));
 
             if (GoalChanceByDistance == null || GoalChanceByDistance.Count == 0)
             {
@@ -207,8 +225,16 @@ namespace FootballBoard.Domain.Config
         /// <summary>When false, a carrier sharing a square may pass only sideways or backwards.</summary>
         public bool AllowForwardPassFromSharedSquare { get; set; } = false;
 
+        /// <summary>
+        /// Longest straight pass, as a fraction of the pitch length (0.5 = half the field, 13 squares on
+        /// a 26-column board). Anything longer has to be played as a long pass.
+        /// </summary>
+        public double MaxStraightPassFieldFraction { get; set; } = 0.5;
+
         internal void Validate(List<string> e)
         {
+            if (double.IsNaN(MaxStraightPassFieldFraction) || MaxStraightPassFieldFraction <= 0 || MaxStraightPassFieldFraction > 1)
+                e.Add("passing.maxStraightPassFieldFraction must be greater than 0 and at most 1.");
             if (double.IsNaN(LaneTolerance) || LaneTolerance <= 0 || LaneTolerance > 0.5)
                 e.Add("passing.laneTolerance must be greater than 0 and at most 0.5.");
             RulesConfig.CheckProbability(e, "passing.longPassSuccessChance", LongPassSuccessChance);
@@ -221,14 +247,17 @@ namespace FootballBoard.Domain.Config
         /// <summary>Chance the shot is on target from inside the opponent's penalty box.</summary>
         public double AccuracyInsideBox { get; set; } = 1.0;
 
-        /// <summary>
-        /// Accuracy lost for each ring of squares around the penalty box (first ring outside the box
-        /// = one drop, second ring = two drops, ...).
-        /// </summary>
+        /// <summary>Accuracy lost on the first ring of squares around the penalty box.</summary>
         public double AccuracyDropPerRing { get; set; } = 0.05;
 
+        /// <summary>
+        /// Each further ring drops this much more than the previous one: with 0.05 and 0.01 the drops
+        /// are 5%, 6%, 7%... so accuracy reads 95%, 89%, 82%, 74%...
+        /// </summary>
+        public double AccuracyDropIncreasePerRing { get; set; } = 0.01;
+
         /// <summary>Accuracy never falls below this, however far out the shot is.</summary>
-        public double MinimumAccuracy { get; set; } = 0.3;
+        public double MinimumAccuracy { get; set; } = 0.2;
 
         /// <summary>Chance the shooter wins when an opponent shares the shooter's square.</summary>
         public double ContestedShooterWinChance { get; set; } = 0.5;
@@ -237,6 +266,7 @@ namespace FootballBoard.Domain.Config
         {
             RulesConfig.CheckProbability(e, "shooting.accuracyInsideBox", AccuracyInsideBox);
             RulesConfig.CheckProbability(e, "shooting.accuracyDropPerRing", AccuracyDropPerRing);
+            RulesConfig.CheckProbability(e, "shooting.accuracyDropIncreasePerRing", AccuracyDropIncreasePerRing);
             RulesConfig.CheckProbability(e, "shooting.minimumAccuracy", MinimumAccuracy);
             RulesConfig.CheckProbability(e, "shooting.contestedShooterWinChance", ContestedShooterWinChance);
             if (MinimumAccuracy > AccuracyInsideBox)

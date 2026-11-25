@@ -20,6 +20,22 @@ namespace FootballBoard.Domain.Tests
             Assert.That(e.State.BallCarrier.Id, Is.EqualTo(Red3));
         }
 
+        [Test]
+        public void StraightPassesReachAtMostHalfThePitch()
+        {
+            var e = Create();
+            Arrange(e, Red2, (Red2, 3, 6), (Red3, 16, 6), (Red4, 17, 2));
+            Assert.That(e.MaxStraightPassCells, Is.EqualTo(13));
+            Assert.That(e.SubmitPlan(Team.Red, Pass(Red3)).Accepted, Is.True, "13 squares is allowed");
+
+            e = Create();
+            Arrange(e, Red2, (Red2, 3, 6), (Red3, 16, 6), (Red4, 17, 2));
+            var r = e.SubmitPlan(Team.Red, Pass(Red4));
+            Assert.That(r.Accepted, Is.False);
+            Assert.That(r.Error, Does.Contain("long pass"));
+            Assert.That(e.SubmitPlan(Team.Red, Long(Red4)).Accepted, Is.True);
+        }
+
         [TestCase(Blue2)]
         [TestCase(Red4)]
         public void AnyPlayerInTheLaneBlocksAStraightPass(int blocker)
@@ -225,7 +241,7 @@ namespace FootballBoard.Domain.Tests
             Arrange(e, Red2, (Red2, 12, 6));
             var r = PlayTurn(e, Shoot());
             var shot = Single<ShotResolved>(r);
-            Assert.That(shot.Accuracy, Is.EqualTo(0.5));
+            Assert.That(shot.Accuracy, Is.EqualTo(0.2).Within(1e-9));
             Assert.That(shot.Outcome, Is.EqualTo(ShotOutcome.Missed));
             Assert.That(Single<RestartAwarded>(r).Kind, Is.EqualTo(RestartKind.GoalKick));
             Assert.That(e.State.BallCarrier.Id, Is.EqualTo(BlueGk));

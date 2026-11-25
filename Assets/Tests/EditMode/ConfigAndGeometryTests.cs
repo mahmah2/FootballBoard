@@ -142,12 +142,16 @@ namespace FootballBoard.Domain.Tests
         [TestCase(21, 6, 0.95)]   // first ring, in front
         [TestCase(21, 3, 0.95)]   // first ring, corner
         [TestCase(24, 9, 0.95)]   // first ring, beside the box
-        [TestCase(20, 6, 0.90)]   // second ring
-        [TestCase(25, 12, 0.80)]  // fourth ring, out wide on the goal line
-        [TestCase(12, 6, 0.50)]   // tenth ring (centre circle)
-        [TestCase(8, 6, 0.30)]    // 14 rings: floor
-        [TestCase(0, 0, 0.30)]    // own corner: floor
-        public void ShotAccuracyDropsFivePercentPerRingAroundTheBox(int x, int y, double expected)
+        [TestCase(20, 6, 0.89)]   // second ring: -5% then -6%
+        [TestCase(19, 6, 0.82)]   // third ring: -7%
+        [TestCase(18, 6, 0.74)]   // fourth ring: -8%
+        [TestCase(14, 6, 0.32)]   // eighth ring
+        [TestCase(25, 12, 0.74)]  // fourth ring, out wide on the goal line
+        [TestCase(13, 6, 0.20)]   // ninth ring: floor
+        [TestCase(12, 6, 0.20)]   // tenth ring (centre circle): floor
+        [TestCase(8, 6, 0.20)]    // 14 rings: floor
+        [TestCase(0, 0, 0.20)]    // own corner: floor
+        public void ShotAccuracyDropsFasterEachRingAroundTheBox(int x, int y, double expected)
         {
             var engine = MatchEngine.Create(null, null, new ScriptedRandom());
             Assert.That(engine.ShotAccuracy(Team.Red, new Cell(x, y)), Is.EqualTo(expected).Within(1e-9));
@@ -158,7 +162,7 @@ namespace FootballBoard.Domain.Tests
         {
             var engine = MatchEngine.Create(null, null, new ScriptedRandom());
             Assert.That(engine.ShotAccuracy(Team.Blue, new Cell(3, 6)), Is.EqualTo(1.0));
-            Assert.That(engine.ShotAccuracy(Team.Blue, new Cell(5, 6)), Is.EqualTo(0.90).Within(1e-9));
+            Assert.That(engine.ShotAccuracy(Team.Blue, new Cell(5, 6)), Is.EqualTo(0.89).Within(1e-9));
         }
 
         [Test]
@@ -166,6 +170,7 @@ namespace FootballBoard.Domain.Tests
         {
             var rules = FootballBoard.Domain.Config.RulesConfig.CreateDefault();
             rules.Shooting.AccuracyDropPerRing = 0.1;
+            rules.Shooting.AccuracyDropIncreasePerRing = 0;
             rules.Shooting.MinimumAccuracy = 0.5;
             var engine = MatchEngine.Create(rules, null, new ScriptedRandom());
             Assert.That(engine.ShotAccuracy(Team.Red, new Cell(20, 6)), Is.EqualTo(0.8).Within(1e-9));
@@ -175,12 +180,23 @@ namespace FootballBoard.Domain.Tests
         [Test]
         public void GoalChanceUsesLastEntryForLargeDistances()
         {
-            var engine = MatchEngine.Create(null, null, new ScriptedRandom());
+            var rules = RulesConfig.CreateDefault();
+            rules.Goalkeeper.DiveReachCells = -1;
+            var engine = MatchEngine.Create(rules, null, new ScriptedRandom());
             Assert.That(engine.GoalChance(0), Is.EqualTo(0.05));
             Assert.That(engine.GoalChance(1), Is.EqualTo(0.3));
             Assert.That(engine.GoalChance(2), Is.EqualTo(0.6));
             Assert.That(engine.GoalChance(3), Is.EqualTo(0.8));
             Assert.That(engine.GoalChance(7), Is.EqualTo(0.8));
+        }
+
+        [Test]
+        public void ShotsBeyondTheKeepersDiveReachAreAlwaysGoals()
+        {
+            var engine = MatchEngine.Create(null, null, new ScriptedRandom());
+            Assert.That(engine.GoalChance(2), Is.EqualTo(0.6));
+            Assert.That(engine.GoalChance(3), Is.EqualTo(1.0));
+            Assert.That(engine.GoalChance(7), Is.EqualTo(1.0));
         }
     }
 }

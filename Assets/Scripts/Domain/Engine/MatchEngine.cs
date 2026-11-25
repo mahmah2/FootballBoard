@@ -202,8 +202,11 @@ namespace FootballBoard.Domain
                 if (distance == 0) return $"{Name(player)} is already on that square.";
                 if (player.IsGoalkeeper)
                 {
-                    if (distance > State.GoalkeeperMoveCells)
-                        return $"Goalkeepers move at most {State.GoalkeeperMoveCells} cell(s) per turn.";
+                    var range = GoalkeeperRange(player);
+                    if (distance > range)
+                        return range < State.GoalkeeperMoveCells
+                            ? $"The ball is near the box: goalkeepers move at most {range} cell(s) this turn."
+                            : $"Goalkeepers move at most {range} cell(s) per turn.";
                     if (!Pitch.InPenaltyBox(team, move.Target)) return "Goalkeepers must stay inside their penalty box.";
                 }
                 else if (distance != 1)
@@ -238,7 +241,7 @@ namespace FootballBoard.Domain
             var player = State.GetPlayer(playerId);
             var result = new List<Cell>();
             if (player == null || !player.Active) return result;
-            var range = player.IsGoalkeeper ? State.GoalkeeperMoveCells : 1;
+            var range = player.IsGoalkeeper ? GoalkeeperRange(player) : 1;
             for (var dx = -range; dx <= range; dx++)
             for (var dy = -range; dy <= range; dy++)
             {
@@ -252,19 +255,33 @@ namespace FootballBoard.Domain
         }
 
         /// <summary>
+        /// How far a goalkeeper may move this turn: the full range normally, but less while the ball is
+        /// inside its penalty box or within <c>NearBallRings</c> rings of it (so it cannot dive across the goal).
+        /// </summary>
+        public int GoalkeeperRange(Player keeper)
+        {
+            var g = Rules.Goalkeeper;
+            var ring = Pitch.RingsOutsidePenaltyBox(keeper.Team, State.BallPosition);
+            return ring <= g.NearBallRings ? Math.Min(State.GoalkeeperMoveCells, g.MaxMoveCellsWhenBallNear) : State.GoalkeeperMoveCells;
+        }
+
+        /// <summary>
         /// Chance a shot from <paramref name="from"/> is on target: full inside the opponent's penalty box,
-        /// then one drop per ring of squares around the box, never below the minimum.
+        /// then a growing drop per ring of squares around the box (5%, 6%, 7%...), never below the minimum.
         /// </summary>
         public double ShotAccuracy(Team shooter, Cell from)
         {
             var r = Rules.Shooting;
             var ring = Pitch.RingsOutsidePenaltyBox(shooter.Opponent(), from);
-            return Math.Max(r.MinimumAccuracy, r.AccuracyInsideBox - ring * r.AccuracyDropPerRing);
+            var drop = ring * r.AccuracyDropPerRing + r.AccuracyDropIncreasePerRing * ring * (ring - 1) / 2.0;
+            return Math.Max(r.MinimumAccuracy, r.AccuracyInsideBox - drop);
         }
 
         /// <summary>Goal chance for an on-target shot, given the goalkeeper's distance from the target cell.</summary>
         public double GoalChance(int keeperDistance)
         {
+            var reach = Rules.Goalkeeper.DiveReachCells;
+            if (reach >= 0 && keeperDistance > reach) return 1.0; // out of the keeper's reach
             var table = Rules.Goalkeeper.GoalChanceByDistance;
             return table[Math.Min(Math.Max(keeperDistance, 0), table.Count - 1)];
         }
@@ -300,6 +317,8 @@ namespace FootballBoard.Domain
                     if (!Rules.Passing.AllowForwardPassFromSharedSquare &&
                         State.OccupancyAt(carrier.Position) > 1 && IsForward(carrier, receiver.Position))
                         return "A carrier sharing a square can only pass sideways or backwards.";
+                    if (action.Option == CarrierOption.StraightPass && !IsStraightPassInRange(carrier.Position, receiver.Position))
+                        return $"Too far for a pass (at most {MaxStraightPassCells} squares): play a long pass.";
                     if (action.Option == CarrierOption.StraightPass && !State.IsLaneClear(carrier.Position, receiver.Position))
                         return "The passing lane is blocked.";
                     return null;
@@ -307,6 +326,11 @@ namespace FootballBoard.Domain
                     return "Unknown ball-carrier option.";
             }
         }
+
+        /// <summary>Longest straight pass in squares (a fraction of the pitch length, see rules.json).</summary>
+        public int MaxStraightPassCells => Math.Max(1, (int)Math.Floor(Pitch.Columns * Rules.Passing.MaxStraightPassFieldFraction + 1e-9));
+
+        public bool IsStraightPassInRange(Cell from, Cell to) => from.DistanceTo(to) <= MaxStraightPassCells;
 
         private static bool IsForward(Player from, Cell to) => (to.X - from.Position.X) * from.Team.AttackDirection() > 0;
 
@@ -348,6 +372,7 @@ namespace FootballBoard.Domain
             var turnTeam = State.TurnTeam;
             var moves = turnPlan.Moves.Concat(otherPlan.Moves).ToList();
             Team? conceded = null;
+            _plannedFrom = State.Players.ToDictionary(p => p.Id, p => p.Position);
 
             if (Rules.Turns.ActionBeforeMovement)
             {
@@ -431,9 +456,12 @@ namespace FootballBoard.Domain
         /// into it; this repeats until no square is over the limit. A player the action already
         /// relocated (throw-in taker, goal-kick keeper, blocker) keeps its new square instead.
         /// </summary>
+        private Dictionary<int, Cell> _plannedFrom; // positions the plans were made from
+
         private List<MoveOrder> ResolveMovement(List<MoveOrder> moves, List<GameEvent> events)
         {
-            var relocated = moves.Where(m => !GetMoveTargets(m.PlayerId).Contains(m.Target)).ToList();
+            var relocated = moves.Where(m => _plannedFrom != null && _plannedFrom.TryGetValue(m.PlayerId, out var from)
+                                             && State.GetPlayer(m.PlayerId).Position != from).ToList();
             foreach (var m in relocated) events.Add(new MoveCancelled(m.PlayerId, m.Target));
             moves = moves.Except(relocated).ToList();
 
