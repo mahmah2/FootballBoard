@@ -252,6 +252,8 @@ namespace FootballBoard.Presentation
             }
         }
 
+        public void SetConfirmLabel(string text) => UiFactory.SetButtonText(_confirm, text);
+
         // ------------------------------------------------------------------ banner (randomized outcomes)
 
         public IEnumerator Banner(string title, string subtitle, Color color, float seconds, bool suspense)

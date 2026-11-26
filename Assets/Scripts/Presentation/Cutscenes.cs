@@ -82,7 +82,8 @@ namespace FootballBoard.Presentation
             _root.gameObject.SetActive(false);
         }
 
-        public IEnumerator Play(CutsceneKind kind, Team attacking, Team defending, bool mirror, string title, string subtitle, Color titleColor)
+        /// <param name="showBall">KeeperDive only: true when the keeper catches it (the ball flies into the gloves).</param>
+        public IEnumerator Play(CutsceneKind kind, Team attacking, Team defending, bool mirror, string title, string subtitle, Color titleColor, bool showBall = true)
         {
             _skip = false;
             _root.gameObject.SetActive(true);
@@ -91,7 +92,7 @@ namespace FootballBoard.Presentation
             _title.color = titleColor;
             _subtitle.text = subtitle;
 
-            var layers = Compose(kind, attacking, defending);
+            var layers = Compose(kind, attacking, defending, showBall);
             _background.sprite = Load(kind == CutsceneKind.KeeperDive ? "bg_goal" : "bg_pitch",
                 () => kind == CutsceneKind.KeeperDive ? CutsceneArt.GoalBackground() : CutsceneArt.PitchBackground());
             var bgFitter = _background.GetComponent<AspectRatioFitter>();
@@ -143,21 +144,27 @@ namespace FootballBoard.Presentation
         /// <summary>Sine ease-out: quick start, long slow glide (the "slow-motion" feel).</summary>
         private static float EaseOut(float x) => Mathf.Sin(x * Mathf.PI * 0.5f);
 
-        private List<Layer> Compose(CutsceneKind kind, Team attacking, Team defending)
+        private List<Layer> Compose(CutsceneKind kind, Team attacking, Team defending, bool showBall)
         {
             var ball = Load("ball", CutsceneArt.Ball);
             switch (kind)
             {
                 case CutsceneKind.KeeperDive:
-                    return new List<Layer>
+                {
+                    var dive = new List<Layer>
                     {
                         new Layer { Sprite = Player("keeper_dive", defending, true), Height = 0.62f,
                             From = new Vector2(-0.30f, -0.02f), To = new Vector2(-0.10f, 0.04f),
-                            RotationFrom = 4, RotationTo = 10, ScaleFrom = 1f, ScaleTo = 1.06f },
-                        new Layer { Sprite = ball, Height = 0.20f,
-                            From = new Vector2(0.30f, -0.06f), To = new Vector2(0.48f, 0.02f),
-                            RotationFrom = 0, RotationTo = -420, ScaleFrom = 1.15f, ScaleTo = 0.95f }
+                            RotationFrom = 4, RotationTo = 10, ScaleFrom = 1f, ScaleTo = 1.06f }
                     };
+                    // A save: the ball comes in from the right and ends in the keeper's gloves.
+                    // Goals and wide shots show the keeper diving with nothing to catch.
+                    if (showBall)
+                        dive.Add(new Layer { Sprite = ball, Height = 0.17f,
+                            From = new Vector2(0.75f, 0.10f), To = new Vector2(0.36f, 0.07f),
+                            RotationFrom = 0, RotationTo = -300, ScaleFrom = 1.25f, ScaleTo = 1f });
+                    return dive;
+                }
                 case CutsceneKind.Duel:
                     return new List<Layer>
                     {

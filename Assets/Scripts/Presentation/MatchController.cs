@@ -49,6 +49,8 @@ namespace FootballBoard.Presentation
         private int? _selected;
         /// <summary>True while the ball carrier is "selected", which shows the MOVE/PASS/SHOOT toolbar.</summary>
         private bool _carrierFocus;
+        /// <summary>Set after warning that the plan is empty; a second CONFIRM then goes through.</summary>
+        private bool _emptyPlanWarned;
         private int _minutesIndex;
         private int _opponentIndex;   // 0 = computer, 1 = hot-seat
         private int _humanTeamIndex;  // 0 = Red, 1 = Blue
@@ -119,6 +121,7 @@ namespace FootballBoard.Presentation
             _strategy = new BasicStrategy();
             _engine = MatchEngine.Create(_rules, settings);
             BuildWorld();
+            MatchLog.Begin(S);
             var result = _engine.StartMatch();
             hud.HideOverlay();
             hud.SetMenuButtonVisible(true);
@@ -256,10 +259,13 @@ namespace FootballBoard.Presentation
             hud.SetPlanningTeam(team);
             yield return new WaitForSeconds(0.6f);
 
-            var result = _engine.SubmitPlan(team, _strategy.PlanTurn(_engine, team));
+            var plan = _strategy.PlanTurn(_engine, team);
+            MatchLog.Plan(S, team, plan, "computer");
+            var result = _engine.SubmitPlan(team, plan);
             if (!result.Accepted)
             {
                 Debug.LogError("[Computer] Plan rejected: " + result.Error);
+                MatchLog.Note("computer plan rejected: " + result.Error);
                 result = _engine.SubmitPlan(team, TeamPlan.Empty());
             }
             if (result.Events.OfType<PlanLocked>().Any())
@@ -275,6 +281,7 @@ namespace FootballBoard.Presentation
             _moves.Clear();
             _action = null;
             _selected = null; _carrierFocus = false;
+            ResetEmptyPlanWarning();
             _mode = Mode.Planning;
             hud.SetPlanningTeam(team);
             hud.ShowMessage(CanDeclare
@@ -332,10 +339,13 @@ namespace FootballBoard.Presentation
                 : $"{Name(result.Winner.Value)} WINS";
             var color = result.IsDraw ? Palette.Chalk : Palette.TeamPrimary(result.Winner.Value);
             hud.ShowOverlay(title, $"Red {result.RedScore} - {result.BlueScore} Blue" + (result.DecidedByGoldenGoal ? "  (golden goal)" : ""),
-                color, false, ("PLAY AGAIN", ShowMenu, true));
+                color, false, ("MAIN MENU", ShowMenu, true));
         }
 
         // ------------------------------------------------------------------ planning input
+
+        /// <summary>Hot red-orange for the shot's chevrons.</summary>
+        private static readonly Color ShotChevron = new Color(1f, 0.27f, 0.08f, 1f);
 
         private bool CanDeclare => _planner == S.TurnTeam && S.PossessionTeam == _planner;
 
@@ -420,10 +430,12 @@ namespace FootballBoard.Presentation
                 return;
             }
 
-            // With a shot declared, tapping a square inside the opponent's goal re-aims it.
-            if (_action != null && _action.Option == CarrierOption.Shot && _engine.IsGoalCell(_planner.Opponent(), cell))
+            // With a shot declared, tapping a square inside the opponent's goal re-aims it. The net is
+            // drawn behind the goal line, off the pitch: a tap on it aims at the goal square in front.
+            var aimCell = NetTapToGoalCell(cell);
+            if (_action != null && _action.Option == CarrierOption.Shot && _engine.IsGoalCell(_planner.Opponent(), aimCell))
             {
-                if (TryChange(() => _action.TargetCell = cell)) ShowShotOdds();
+                if (TryChange(() => _action.TargetCell = aimCell)) ShowShotOdds();
                 Refresh();
                 return;
             }
@@ -489,6 +501,15 @@ namespace FootballBoard.Presentation
             Refresh();
         }
 
+        /// <summary>A tap on the opponent's net (up to two squares behind the goal line) maps to the goal square in front of it.</summary>
+        private Cell NetTapToGoalCell(Cell cell)
+        {
+            if (S.Pitch.InBounds(cell)) return cell;
+            var goalX = S.Pitch.GoalLineX(_planner.Opponent());
+            var behind = goalX == 0 ? cell.X < 0 && cell.X >= -2 : cell.X > goalX && cell.X <= goalX + 2;
+            return behind && cell.Y >= S.Pitch.GoalTop && cell.Y <= S.Pitch.GoalBottom ? new Cell(goalX, cell.Y) : cell;
+        }
+
         private void ShowShotOdds()
         {
             var carrier = S.BallCarrier;
@@ -545,7 +566,18 @@ namespace FootballBoard.Presentation
             }
             if (_mode != Mode.Planning) return;
 
-            var result = _engine.SubmitPlan(_planner, BuildPlan());
+            // Nothing arranged: warn once, and let a second press confirm on purpose.
+            if (_moves.Count == 0 && _action == null && !_emptyPlanWarned)
+            {
+                _emptyPlanWarned = true;
+                hud.SetConfirmLabel("CONFIRM ANYWAY");
+                hud.ShowMessage("No moves arranged: your players will stay where they are. Press CONFIRM ANYWAY to continue.", true);
+                return;
+            }
+
+            var plan = BuildPlan();
+            MatchLog.Plan(S, _planner, plan, "human");
+            var result = _engine.SubmitPlan(_planner, plan);
             if (!result.Accepted)
             {
                 hud.ShowMessage(result.Error, true);
@@ -553,12 +585,19 @@ namespace FootballBoard.Presentation
             }
             _selected = null; _carrierFocus = false;
             _board.ClearOverlay();
-            foreach (var f in _figures.Values) { f.SetSelected(false); f.SetLocked(false); }
+            foreach (var f in _figures.Values) { f.SetSelected(false); f.SetLocked(false); f.SetReady(false); }
 
             if (result.Events.OfType<PlanLocked>().Any())
                 BeginHandover(S.PlanningTeam);
             else
                 StartCoroutine(Resolve(result.Events));
+        }
+
+        private void ResetEmptyPlanWarning()
+        {
+            if (!_emptyPlanWarned) return;
+            _emptyPlanWarned = false;
+            hud.SetConfirmLabel("CONFIRM");
         }
 
         private void ClearPlan()
@@ -618,13 +657,17 @@ namespace FootballBoard.Presentation
 
         private void Refresh()
         {
+            ResetEmptyPlanWarning();
             _board.ClearOverlay();
             var carrier = S.BallCarrier;
             foreach (var f in _figures.Values)
             {
                 var p = S.GetPlayer(f.PlayerId);
-                f.SetSelected(_selected == p.Id);
-                f.SetLocked(p.Team == _planner && LockReason(p) != null);
+                var selected = _selected == p.Id;
+                var locked = p.Team == _planner && LockReason(p) != null;
+                f.SetSelected(selected);
+                f.SetLocked(locked);
+                f.SetReady(p.Team == _planner && p.Active && !locked && !selected);
             }
 
             if (_selected.HasValue)
@@ -665,18 +708,20 @@ namespace FootballBoard.Presentation
                         var goalCell = new Cell(S.Pitch.GoalLineX(_planner.Opponent()), y);
                         _board.HighlightCell(goalCell, Palette.WithAlpha(Palette.Accent, goalCell == aim ? 0.6f : 0.18f));
                     }
-                    _board.DrawArrow(from, _space.CellToWorld(aim), Palette.WithAlpha(Palette.Accent, 0.9f), 0.12f);
+                    // Run the chevrons into the net, so they show even when the shooter is on the goal line.
+                    var intoNet = aim.X == 0 ? Vector3.left : Vector3.right;
+                    _board.DrawChevrons(from, _space.CellToWorld(aim) + intoNet * 0.8f, ShotChevron);
                 }
                 else if (_action.Option == CarrierOption.LongPass && _action.TargetCell.HasValue)
                 {
                     _board.HighlightCell(_action.TargetCell.Value, Palette.WithAlpha(Palette.Chalk, 0.5f), 0.6f);
-                    _board.DrawArrow(from, _space.CellToWorld(_action.TargetCell.Value), Palette.WithAlpha(Palette.Chalk, 0.9f), 0.12f);
+                    _board.DrawChevrons(from, _space.CellToWorld(_action.TargetCell.Value), Palette.Chalk);
                 }
                 else if (_action.ReceiverId.HasValue)
                 {
                     var receiver = S.GetPlayer(_action.ReceiverId.Value);
-                    _board.DrawArrow(from, _figures[receiver.Id].transform.position,
-                        Palette.WithAlpha(_action.Option == CarrierOption.LongPass ? Palette.Chalk : Palette.Accent, 0.9f), 0.12f);
+                    _board.DrawChevrons(from, _figures[receiver.Id].transform.position,
+                        _action.Option == CarrierOption.LongPass ? Palette.Chalk : Palette.Accent);
                 }
             }
 
@@ -707,6 +752,7 @@ namespace FootballBoard.Presentation
         private IEnumerator Resolve(IReadOnlyList<GameEvent> events)
         {
             _mode = Mode.Resolving;
+            MatchLog.Events(S, events);
             hud.SetPlanningTeam(null);
             hud.SetPlanControls(false, false, CarrierOption.Move);
             UpdateHud();
@@ -830,10 +876,10 @@ namespace FootballBoard.Presentation
         }
 
         /// <summary>Plays an illustrated cutscene for a random roll (the result is already decided).</summary>
-        private IEnumerator Cutscene(CutsceneKind kind, Team attacking, Team defending, string title, string subtitle, Color color, bool mirror = false)
+        private IEnumerator Cutscene(CutsceneKind kind, Team attacking, Team defending, string title, string subtitle, Color color, bool mirror = false, bool showBall = true)
         {
             if (!playCutscenes) yield break;
-            yield return hud.Cutscenes.Play(kind, attacking, defending, mirror, title, subtitle, color);
+            yield return hud.Cutscenes.Play(kind, attacking, defending, mirror, title, subtitle, color, showBall);
         }
 
         private IEnumerator AnimateShot(ShotResolved shot)
@@ -849,7 +895,8 @@ namespace FootballBoard.Presentation
                 var keeper = S.Goalkeeper(shooter.Team.Opponent());
                 yield return Cutscene(CutsceneKind.KeeperDive, shooter.Team, keeper.Team,
                     "SHOT!", $"{Name(shooter)}: on target {shot.Accuracy:P0} · beats the keeper {shot.GoalChance:P0}",
-                    Palette.TeamPrimary(shooter.Team), mirror: shot.Target.Y > keeper.Position.Y);
+                    Palette.TeamPrimary(shooter.Team), mirror: shot.Target.Y > keeper.Position.Y,
+                    showBall: shot.Outcome == ShotOutcome.Saved);
             }
             else if (shot.Outcome == ShotOutcome.LostContest)
             {
@@ -868,8 +915,7 @@ namespace FootballBoard.Presentation
                         Name(S.GetPlayer(shot.DefenderId.Value)) + " wins the ball", Palette.Warning, 0.9f, shot.IsRandomized);
                     break;
                 case ShotOutcome.Missed:
-                    var wide = targetWorld + into * 1.2f + Vector3.forward * (shot.Target.Y < S.Pitch.CentreRow ? 2.5f : -2.5f);
-                    yield return _ball.FlyTo(wide, 1.3f, 1.2f);
+                    yield return _ball.FlyTo(WideOfGoal(shot), 1.3f, 1.2f);
                     yield return hud.Banner("WIDE!", $"Only a {shot.Accuracy:P0} chance to hit the target", Palette.Chalk, 1.0f, false);
                     break;
                 case ShotOutcome.Saved:
@@ -891,6 +937,24 @@ namespace FootballBoard.Presentation
                     _viewOwner = null;
                     break;
             }
+        }
+
+        /// <summary>
+        /// Where a missed shot ends up: past the goal line, clearly outside the post nearest the aim
+        /// (a shot at the centre drifts to the side the shooter stands on).
+        /// </summary>
+        private Vector3 WideOfGoal(ShotResolved shot)
+        {
+            var lineX = shot.Target.X;
+            var into = lineX == 0 ? Vector3.left : Vector3.right;
+            var top = _space.CellToWorld(new Cell(lineX, S.Pitch.GoalTop));
+            var bottom = _space.CellToWorld(new Cell(lineX, S.Pitch.GoalBottom));
+            var shooterRow = S.GetPlayer(shot.ShooterId).Position.Y;
+            var row = shot.Target.Y != S.Pitch.CentreRow ? shot.Target.Y : shooterRow;
+            var high = row < S.Pitch.CentreRow || (row == S.Pitch.CentreRow && shot.ShooterId % 2 == 0);
+            // Cell centres of the goal's end squares are half a square inside the posts.
+            var post = high ? top + Vector3.forward * 0.5f : bottom + Vector3.back * 0.5f;
+            return post + (high ? Vector3.forward : Vector3.back) * 1.4f + into * 0.9f;
         }
 
         // ------------------------------------------------------------------ view sync

@@ -10,7 +10,8 @@ namespace FootballBoard.Presentation
     {
         public const float FigureScale = 1.5f;
         private Transform _body;
-        private GameObject _selectionRing;
+        private SelectionHalo _selectionHalo;
+        private RadarRing _readyRing;
         private GameObject _lockedRing;
         private float _phase;
 
@@ -37,16 +38,98 @@ namespace FootballBoard.Presentation
             var shirt = player.IsGoalkeeper ? Palette.Keeper(player.Team) : Palette.TeamPrimary(player.Team);
             var shorts = Palette.TeamSecondary(player.Team);
 
-            // Base disc in the team colour so pieces read from above.
-            kit.Primitive(PrimitiveType.Cylinder, "Base", transform, Palette.TeamPrimary(player.Team) * 0.7f + Palette.Shadow * 0.3f,
-                new Vector3(0, 0.025f, 0), new Vector3(0.36f, 0.025f, 0.36f));
-            _selectionRing = kit.Primitive(PrimitiveType.Cylinder, "Selection", transform, Palette.Accent, new Vector3(0, 0.012f, 0), new Vector3(0.46f, 0.012f, 0.46f));
-            _selectionRing.SetActive(false);
-            _lockedRing = kit.Primitive(PrimitiveType.Cylinder, "Locked", transform, Palette.Shadow, new Vector3(0, 0.011f, 0), new Vector3(0.43f, 0.011f, 0.43f));
+            // Selected: spinning arcs in the team colour. Ready (can be picked this turn): a radar-swept donut.
+            _selectionHalo = SelectionHalo.Create(transform, kit, Palette.TeamPrimary(player.Team), 0.014f);
+            _readyRing = RadarRing.Create(transform, 0.009f);
+            _lockedRing = kit.Primitive(PrimitiveType.Cylinder, "Locked", transform, Palette.WithAlpha(Palette.Shadow, 0.4f), new Vector3(0, 0.011f, 0), new Vector3(0.43f, 0.011f, 0.43f), true);
             _lockedRing.SetActive(false);
 
             _body = new GameObject("Body").transform;
             _body.SetParent(transform, false);
+            var hasModel = BuildFromModel(player, kit, shirt, shorts);
+            if (!hasModel) BuildPrimitives(player, kit, shirt, shorts);
+
+            // Shirt number floating above the head, facing the camera.
+            var label = new GameObject("Number");
+            label.transform.SetParent(_body, false);
+            label.transform.localPosition = new Vector3(0, hasModel ? FigureHeight + 0.3f : 0.88f, 0);
+            label.transform.rotation = cameraRotation;
+            var tmp = label.AddComponent<TextMeshPro>();
+            tmp.text = player.Number.ToString();
+            tmp.fontSize = 3.2f;
+            tmp.fontStyle = FontStyles.Bold;
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.color = shorts;
+            tmp.outlineWidth = 0.25f;
+            tmp.outlineColor = Palette.Shadow;
+            tmp.rectTransform.sizeDelta = new Vector2(1f, 0.5f);
+        }
+
+        // ------------------------------------------------------------------ 3D model
+
+        /// <summary>The low-poly player (Resources/Models/player.glb, imported by glTFast); null if absent.</summary>
+        private static GameObject _model;
+        private static bool _modelLoaded;
+        private const float ModelHeight = 1.85f;   // model units, feet to hair
+        private const float FigureHeight = 1.0f;   // body height of the piece, in figure units
+        private const float FigureBreadth = 1.35f; // widen the slim model so it reads from the top-down camera
+
+        private static readonly Color Hair = new Color32(0x3B, 0x2A, 0x1E, 0xFF);
+        private static readonly Color Glove = new Color32(0xFF, 0xD2, 0x3F, 0xFF);
+        private static readonly Color Boot = new Color32(0x26, 0x26, 0x2A, 0xFF);
+
+        private bool BuildFromModel(Player player, MaterialKit kit, Color shirt, Color shorts)
+        {
+            if (!_modelLoaded)
+            {
+                _modelLoaded = true;
+                _model = Resources.Load<GameObject>("Models/player");
+            }
+            if (_model == null) return false;
+
+            var model = Instantiate(_model, _body, false);
+            model.name = "Model";
+            var scale = FigureHeight / ModelHeight;
+            model.transform.localScale = new Vector3(scale * FigureBreadth, scale, scale * FigureBreadth);
+            // The model faces +Z; turn it toward the goal this team attacks (Red attacks +X).
+            model.transform.localRotation = Quaternion.Euler(0, player.Team == Team.Red ? 90f : -90f, 0);
+
+            var keeperShorts = Palette.Shadow;
+            foreach (var renderer in model.GetComponentsInChildren<Renderer>())
+            {
+                // Meshes are named "<Joint>_<material>", e.g. "Torso_shirt" or "HandL_skin".
+                var name = renderer.gameObject.name;
+                var part = name.Substring(name.LastIndexOf('_') + 1);
+                var isHand = name.StartsWith("Hand");
+                var color = part switch
+                {
+                    "shirt" => shirt,
+                    "sock" => shirt,
+                    "bootTrim" => shirt,
+                    "shorts" => player.IsGoalkeeper ? keeperShorts : shorts,
+                    "band" => player.IsGoalkeeper ? keeperShorts : shorts,
+                    "skin" => player.IsGoalkeeper && isHand ? Glove : Palette.Skin,
+                    "hair" => Hair,
+                    "boot" => Boot,
+                    "white" => Palette.Chalk,
+                    "lip" => Palette.Skin * 0.85f,
+                    _ => Palette.Shadow,
+                };
+                color.a = 1f;
+                var materials = renderer.sharedMaterials;
+                for (var i = 0; i < materials.Length; i++) materials[i] = kit.Solid(color);
+                renderer.sharedMaterials = materials;
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+            }
+            return true;
+        }
+
+        private void BuildPrimitives(Player player, MaterialKit kit, Color shirt, Color shorts)
+        {
+            // The simple fallback figure stands on a team-coloured disc so it reads from above
+            // (the 3D model needs none: its kit shows the team).
+            kit.Primitive(PrimitiveType.Cylinder, "Base", transform, Palette.TeamPrimary(player.Team) * 0.7f + Palette.Shadow * 0.3f,
+                new Vector3(0, 0.025f, 0), new Vector3(0.36f, 0.025f, 0.36f));
             // Legs (slight taper and splay), shorts, torso, head, hair.
             var legL = kit.Primitive(PrimitiveType.Capsule, "LegL", _body, Palette.Shadow, new Vector3(-0.055f, 0.13f, 0), new Vector3(0.075f, 0.09f, 0.075f));
             legL.transform.localRotation = Quaternion.Euler(0, 0, -4f);
@@ -61,24 +144,12 @@ namespace FootballBoard.Presentation
                 kit.Primitive(PrimitiveType.Sphere, "GloveL", _body, Palette.Chalk, new Vector3(-0.17f, 0.4f, 0), Vector3.one * 0.09f);
                 kit.Primitive(PrimitiveType.Sphere, "GloveR", _body, Palette.Chalk, new Vector3(0.17f, 0.4f, 0), Vector3.one * 0.09f);
             }
-
-            // Shirt number floating above the head, facing the camera.
-            var label = new GameObject("Number");
-            label.transform.SetParent(_body, false);
-            label.transform.localPosition = new Vector3(0, 0.88f, 0);
-            label.transform.rotation = cameraRotation;
-            var tmp = label.AddComponent<TextMeshPro>();
-            tmp.text = player.Number.ToString();
-            tmp.fontSize = 3.2f;
-            tmp.fontStyle = FontStyles.Bold;
-            tmp.alignment = TextAlignmentOptions.Center;
-            tmp.color = shorts;
-            tmp.outlineWidth = 0.25f;
-            tmp.outlineColor = Palette.Shadow;
-            tmp.rectTransform.sizeDelta = new Vector2(1f, 0.5f);
         }
 
-        public void SetSelected(bool selected) => _selectionRing.SetActive(selected);
+        public void SetSelected(bool selected) => _selectionHalo.gameObject.SetActive(selected);
+
+        /// <summary>Grey donut: this player belongs to the planning team and can be selected.</summary>
+        public void SetReady(bool ready) => _readyRing.gameObject.SetActive(ready);
 
         public void SetLocked(bool locked) => _lockedRing.SetActive(locked);
 

@@ -15,7 +15,8 @@ namespace FootballBoard.Presentation
         private Transform _overlay;
         private readonly List<GameObject> _cellPool = new List<GameObject>();
         private readonly List<LineRenderer> _linePool = new List<LineRenderer>();
-        private int _cellsUsed, _linesUsed;
+        private readonly List<ChevronTrail> _trailPool = new List<ChevronTrail>();
+        private int _cellsUsed, _linesUsed, _trailsUsed;
 
         public void Build(Pitch pitch, BoardSpace space, MaterialKit kit)
         {
@@ -104,7 +105,8 @@ namespace FootballBoard.Presentation
         {
             foreach (var go in _cellPool) go.SetActive(false);
             foreach (var lr in _linePool) lr.gameObject.SetActive(false);
-            _cellsUsed = _linesUsed = 0;
+            foreach (var trail in _trailPool) trail.Hide();
+            _cellsUsed = _linesUsed = _trailsUsed = 0;
         }
 
         public void HighlightCell(Cell cell, Color color, float size = 0.86f)
@@ -129,6 +131,13 @@ namespace FootballBoard.Presentation
             lr.positionCount = 2;
             lr.SetPosition(0, from + Vector3.up * 0.05f);
             lr.SetPosition(1, to + Vector3.up * 0.05f);
+        }
+
+        /// <summary>Animated chevrons from <paramref name="from"/> toward a pass or shot target.</summary>
+        public void DrawChevrons(Vector3 from, Vector3 to, Color color)
+        {
+            if (_trailsUsed == _trailPool.Count) _trailPool.Add(ChevronTrail.Create(_overlay, _kit));
+            _trailPool[_trailsUsed++].Show(from, to, color);
         }
 
         // ------------------------------------------------------------------ helpers

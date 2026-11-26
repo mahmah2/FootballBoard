@@ -192,6 +192,17 @@ namespace FootballBoard.Domain.Tests
         }
 
         [Test]
+        public void ACarrierStandingInTheGoalMouthCanShoot()
+        {
+            // Red 4 on a goal-line square of Blue's goal: the default aim is its own square.
+            var e = Create(new ScriptedRandom(0.1));
+            Arrange(e, Red4, (Red4, 25, 4));
+            Assert.That(e.ShotTargetFor(e.State.GetPlayer(Red4), CarrierAction.Shot()), Is.EqualTo(new Cell(25, 4)));
+            var r = PlayTurn(e, Shoot());
+            Assert.That(Single<ShotResolved>(r).Outcome, Is.EqualTo(ShotOutcome.Goal));
+        }
+
+        [Test]
         public void ConcedingTeamKeepsTheTurnAfterScoringBack()
         {
             var e = Create(new ScriptedRandom(0.1, 0.1));
