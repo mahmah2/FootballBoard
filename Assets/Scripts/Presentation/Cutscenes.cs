@@ -75,7 +75,7 @@ namespace FootballBoard.Presentation
             var caption = UiFactory.Rect("Caption", _root, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0.5f, 0), new Vector2(0, 40), new Vector2(0, 170));
             UiFactory.Panel(caption, Palette.WithAlpha(Palette.Shadow, 0.75f), false);
             var title = UiFactory.Rect("Title", caption, new Vector2(0, 0.45f), new Vector2(1, 1), new Vector2(0.5f, 1), Vector2.zero, Vector2.zero);
-            _title = UiFactory.Label(title, "", 64, Palette.Accent);
+            _title = UiFactory.Label(title, "", 72, Palette.Accent, TextAlignmentOptions.Center, UiFactory.DisplayFont);
             var sub = UiFactory.Rect("Subtitle", caption, new Vector2(0, 0), new Vector2(1, 0.48f), new Vector2(0.5f, 0), Vector2.zero, Vector2.zero);
             _subtitle = UiFactory.Label(sub, "", 30, Palette.Chalk);
 

@@ -17,26 +17,40 @@ namespace FootballBoard.Presentation
         private static Material _material;
         private static Mesh _sweepMesh, _baseMesh;
 
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
         private Transform _rotor;
+        private Renderer[] _renderers;
+        private MaterialPropertyBlock _block;
 
-        public static RadarRing Create(Transform parent, float y)
+        /// <param name="scale">1 = the donut under a player figure (in figure units).</param>
+        public static RadarRing Create(Transform parent, float y, float scale = 1f, string name = "Ready")
         {
-            var go = new GameObject("Ready");
+            var go = new GameObject(name);
             go.transform.SetParent(parent, false);
             go.transform.localPosition = new Vector3(0, y, 0);
+            go.transform.localScale = Vector3.one * scale;
             var radar = go.AddComponent<RadarRing>();
 
-            Part(go.transform, "Base", BaseMesh(), 0f);
+            var baseRing = Part(go.transform, "Base", BaseMesh(), 0f);
             radar._rotor = new GameObject("Rotor").transform;
             radar._rotor.SetParent(go.transform, false);
-            Part(radar._rotor, "Sweep", SweepMesh(), 0.001f);
+            var sweep = Part(radar._rotor, "Sweep", SweepMesh(), 0.001f);
+            radar._renderers = new[] { baseRing, sweep };
             go.SetActive(false);
             return radar;
         }
 
+        /// <summary>Tints the ring (white keeps the default silver).</summary>
+        public void SetTint(Color tint)
+        {
+            _block ??= new MaterialPropertyBlock();
+            _block.SetColor(ColorId, tint);
+            foreach (var r in _renderers) r.SetPropertyBlock(_block);
+        }
+
         private void Update() => _rotor.localRotation = Quaternion.Euler(0, Time.time * Speed, 0);
 
-        private static void Part(Transform parent, string name, Mesh mesh, float y)
+        private static Renderer Part(Transform parent, string name, Mesh mesh, float y)
         {
             var go = new GameObject(name);
             go.transform.SetParent(parent, false);
@@ -46,6 +60,7 @@ namespace FootballBoard.Presentation
             r.sharedMaterial = Material();
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             r.receiveShadows = false;
+            return r;
         }
 
         // Unlit, transparent and driven by vertex colour (always included in builds).

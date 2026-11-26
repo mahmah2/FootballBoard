@@ -63,7 +63,8 @@
 
   "tackle": {
     "enabled": true,
-    "successChance": 0.5
+    "successChance": 0.5,
+    "automaticOnSharedSquare": true   // a defender and the carrier arriving on the same square = automatic 50/50 tackle
   },
 
   "clock": {

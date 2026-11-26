@@ -55,9 +55,11 @@ namespace FootballBoard.Presentation
             label.transform.localPosition = new Vector3(0, hasModel ? FigureHeight + 0.3f : 0.88f, 0);
             label.transform.rotation = cameraRotation;
             var tmp = label.AddComponent<TextMeshPro>();
+            var font = UiTheme.Current.bodyFont;
+            if (font != null) tmp.font = font;   // before the outline, see UiFactory.Label
             tmp.text = player.Number.ToString();
-            tmp.fontSize = 3.2f;
-            tmp.fontStyle = FontStyles.Bold;
+            tmp.fontSize = font != null ? 3.8f : 3.2f;
+            tmp.fontStyle = font != null ? FontStyles.Normal : FontStyles.Bold;
             tmp.alignment = TextAlignmentOptions.Center;
             tmp.color = shorts;
             tmp.outlineWidth = 0.25f;

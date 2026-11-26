@@ -73,6 +73,13 @@ namespace FootballBoard.Presentation
             hud.ClearClicked += ClearPlan;
             hud.FitClicked += () => cameraRig.Fit();
             hud.MenuClicked += OpenPause;
+            var audio = GameAudio.Ensure();
+            hud.SetSoundIcon(audio.SoundOn);
+            hud.SetVolume(audio.Volume);
+            audio.SoundChanged += hud.SetSoundIcon;
+            audio.VolumeChanged += hud.SetVolume;
+            hud.SoundClicked += () => GameAudio.Instance.ToggleSound();
+            hud.VolumeChanged += OnVolumeSlider;
             pointer.Tapped += OnTap;
             pointer.ConfirmPressed += () => { if (!hud.OverlayVisible && !hud.PauseVisible) Confirm(); };
             pointer.CancelPressed += Cancel;
@@ -85,33 +92,48 @@ namespace FootballBoard.Presentation
         private void ShowMenu()
         {
             _mode = Mode.Menu;
+            GameAudio.Music(MusicTrack.Theme);
             hud.SetMenuButtonVisible(false);
             hud.SetPlanningTeam(null);
             var vsComputer = _opponentIndex == 0;
-            hud.ShowOverlay("FOOTBALL BOARD",
+            hud.ShowMainMenu("FOOTBALL BOARD",
                 vsComputer
                     ? "Play against the computer. Choose your team and the match length."
                     : "Two players on one device: pass it between turns.",
-                Palette.Accent, true,
-                ("KICK OFF", StartMatch, true));
-            var row = 0;
-            hud.AddOverlayDropdown("OpponentDropdown", row++,
+                StartMatch);
+            hud.ShowOverlayBackground();
+            hud.AddMenuDropdown("OpponentDropdown",
                 new List<string> { "OPPONENT: COMPUTER", "OPPONENT: 2 PLAYERS (HOT-SEAT)" },
                 _opponentIndex,
                 index => { _opponentIndex = index; ShowMenu(); });
             if (vsComputer)
-                hud.AddOverlayDropdown("TeamDropdown", row++,
+                hud.AddMenuDropdown("TeamDropdown",
                     new List<string> { "YOU PLAY: RED", "YOU PLAY: BLUE" },
                     _humanTeamIndex,
                     index => _humanTeamIndex = index);
-            hud.AddOverlayDropdown("MatchLengthDropdown", row,
+            hud.AddMenuDropdown("MatchLengthDropdown",
                 _rules.Clock.PresetMinutes.Select(m => $"MATCH LENGTH: {m} MIN").ToList(),
                 _minutesIndex,
                 index => _minutesIndex = index);
         }
 
+        private float _lastVolumeTick;
+
+        /// <summary>The volume slider: sets the master volume, with a soft tick to hear the new level.</summary>
+        private void OnVolumeSlider(float volume)
+        {
+            GameAudio.Instance?.SetVolume(volume);
+            if (Mathf.Abs(volume - _lastVolumeTick) >= 0.1f)
+            {
+                _lastVolumeTick = volume;
+                GameAudio.Play(Sfx.Click);
+            }
+        }
+
         private void StartMatch()
         {
+            GameAudio.Play(Sfx.Confirm);
+            GameAudio.Music(MusicTrack.Match);
             var settings = new MatchSettings
             {
                 Mode = _opponentIndex == 0 ? GameMode.HumanVsComputer : GameMode.HumanVsHuman,
@@ -323,6 +345,7 @@ namespace FootballBoard.Presentation
         private IEnumerator GoldenGoalIntro()
         {
             UpdateHud();
+            GameAudio.Play(Sfx.WhistleLong);
             yield return hud.Banner("GOLDEN GOAL", "The next goal wins", Palette.Accent, 1.4f, false);
             AfterResolution();
         }
@@ -330,6 +353,8 @@ namespace FootballBoard.Presentation
         private void ShowFullTime()
         {
             _mode = Mode.Over;
+            GameAudio.Play(Sfx.FinalWhistle);
+            GameAudio.Music(MusicTrack.Theme);
             hud.SetMenuButtonVisible(false);
             hud.SetPlanningTeam(null);
             hud.SetPlanControls(false, false, CarrierOption.Move);
@@ -360,12 +385,14 @@ namespace FootballBoard.Presentation
                 case CarrierOption.Move:
                     _action = null;
                     _mode = Mode.Planning;
+                    GameAudio.Play(Sfx.Click);
                     break;
                 case CarrierOption.StraightPass:
                 case CarrierOption.LongPass:
                     _moves.Remove(carrier.Id);
                     _action = new CarrierAction { Option = option };
                     _mode = Mode.PickReceiver;
+                    GameAudio.Play(Sfx.Click);
                     hud.ShowMessage(option == CarrierOption.StraightPass
                         ? "Tap a teammate with a clear lane (any player in between blocks it)."
                         : "Tap a teammate, or any square to play the ball into space. It lands on target 1 time in 9.");
@@ -374,6 +401,7 @@ namespace FootballBoard.Presentation
                     _moves.Remove(carrier.Id);
                     _action = CarrierAction.Shot(S.Pitch.ShotTarget(carrier.Team, carrier.Position));
                     _mode = Mode.Planning;
+                    GameAudio.Play(Sfx.Target);
                     ShowShotOdds();
                     break;
             }
@@ -410,6 +438,7 @@ namespace FootballBoard.Presentation
                         }))
                     {
                         _mode = Mode.Planning;
+                        GameAudio.Play(Sfx.Target);
                         if (tooFar)
                             hud.ShowMessage($"Too far for a pass (more than {_engine.MaxStraightPassCells} squares): it becomes a LONG PASS, on target 1 time in 9.");
                     }
@@ -419,12 +448,14 @@ namespace FootballBoard.Presentation
                     if (TryChange(() => { _action.ReceiverId = null; _action.TargetCell = cell; }))
                     {
                         _mode = Mode.Planning;
+                        GameAudio.Play(Sfx.Target);
                         hud.ShowMessage("Ball into space: move a player onto that square to collect it. Two arrivals = 50/50.");
                     }
                 }
                 else
                 {
                     hud.ShowMessage("Tap one of your teammates to receive the pass.", true);
+                    GameAudio.Play(Sfx.Error);
                 }
                 Refresh();
                 return;
@@ -435,7 +466,7 @@ namespace FootballBoard.Presentation
             var aimCell = NetTapToGoalCell(cell);
             if (_action != null && _action.Option == CarrierOption.Shot && _engine.IsGoalCell(_planner.Opponent(), aimCell))
             {
-                if (TryChange(() => _action.TargetCell = aimCell)) ShowShotOdds();
+                if (TryChange(() => _action.TargetCell = aimCell)) { ShowShotOdds(); GameAudio.Play(Sfx.Target); }
                 Refresh();
                 return;
             }
@@ -457,6 +488,7 @@ namespace FootballBoard.Presentation
                     var id = selected.Id;
                     if (TryChange(() => _moves[id] = new MoveOrder(id, cell, tackle)))
                     {
+                        GameAudio.Play(Sfx.Click);
                         _selected = null; _carrierFocus = false;
                         if (tackle) hud.ShowMessage("Tackle requested: 50/50 if you reach the carrier.");
                     }
@@ -470,6 +502,7 @@ namespace FootballBoard.Presentation
             if (_carrierFocus && CurrentOption != CarrierOption.Move)
             {
                 // The carrier is passing or shooting: just show the toolbar so the choice can be changed.
+                GameAudio.Play(Sfx.Select);
                 _selected = null;
                 Refresh();
                 return;
@@ -480,11 +513,13 @@ namespace FootballBoard.Presentation
                 if (lockReason != null)
                 {
                     hud.ShowMessage(lockReason, true);
+                    GameAudio.Play(Sfx.Error);
                     _selected = null;
                 }
                 else
                 {
                     _selected = tapped.Id;
+                    GameAudio.Play(Sfx.Select);
                     if (tapped.IsGoalkeeper)
                     {
                         var range = _engine.GoalkeeperRange(tapped);
@@ -545,6 +580,7 @@ namespace FootballBoard.Presentation
             foreach (var m in movesBackup) _moves[m.PlayerId] = m;
             _action = actionBackup;
             hud.ShowMessage(error, true);
+            GameAudio.Play(Sfx.Error);
             return false;
         }
 
@@ -572,6 +608,7 @@ namespace FootballBoard.Presentation
                 _emptyPlanWarned = true;
                 hud.SetConfirmLabel("CONFIRM ANYWAY");
                 hud.ShowMessage("No moves arranged: your players will stay where they are. Press CONFIRM ANYWAY to continue.", true);
+                GameAudio.Play(Sfx.Error);
                 return;
             }
 
@@ -581,8 +618,10 @@ namespace FootballBoard.Presentation
             if (!result.Accepted)
             {
                 hud.ShowMessage(result.Error, true);
+                GameAudio.Play(Sfx.Error);
                 return;
             }
+            GameAudio.Play(Sfx.Confirm);
             _selected = null; _carrierFocus = false;
             _board.ClearOverlay();
             foreach (var f in _figures.Values) { f.SetSelected(false); f.SetLocked(false); f.SetReady(false); }
@@ -684,8 +723,8 @@ namespace FootballBoard.Presentation
                 var from = _figures[move.PlayerId].transform.position;
                 var to = _space.CellToWorld(move.Target);
                 var color = move.Tackle ? Palette.Warning : Palette.Accent;
-                _board.HighlightCell(move.Target, Palette.WithAlpha(color, 0.45f), 0.5f);
-                _board.DrawArrow(from, to, Palette.WithAlpha(color, 0.9f));
+                _board.DrawTargetRing(move.Target, color);
+                _board.DrawMoveTrail(from, to, color);
             }
 
             if (_mode == Mode.PickReceiver)
@@ -714,7 +753,7 @@ namespace FootballBoard.Presentation
                 }
                 else if (_action.Option == CarrierOption.LongPass && _action.TargetCell.HasValue)
                 {
-                    _board.HighlightCell(_action.TargetCell.Value, Palette.WithAlpha(Palette.Chalk, 0.5f), 0.6f);
+                    _board.DrawTargetRing(_action.TargetCell.Value, Palette.Chalk);
                     _board.DrawChevrons(from, _space.CellToWorld(_action.TargetCell.Value), Palette.Chalk);
                 }
                 else if (_action.ReceiverId.HasValue)
@@ -781,11 +820,13 @@ namespace FootballBoard.Presentation
                         hud.SetClock(clock.ElapsedSeconds, S.DurationSeconds, S.IsGoldenGoal);
                         break;
                     case CoinTossed toss:
+                        if (toss.WasRandom) GameAudio.Play(Sfx.Coin);
                         yield return hud.Banner($"{Name(toss.KickoffTeam)} KICKS OFF", toss.WasRandom ? "Coin toss" : "", Palette.TeamPrimary(toss.KickoffTeam), 1.0f, toss.WasRandom);
                         break;
                     case LooseBallClaimed claim:
                         if (claim.IsRandomized)
                         {
+                            GameAudio.Play(Sfx.Clash);
                             var winnerTeam = S.GetPlayer(claim.PlayerId).Team;
                             yield return Cutscene(CutsceneKind.Duel, winnerTeam, winnerTeam.Opponent(),
                                 "50/50!", $"{claim.Contenders.Count} players reach the loose ball together", Palette.Accent);
@@ -795,10 +836,12 @@ namespace FootballBoard.Presentation
                             yield return hud.Banner("CLASH!", $"{Name(S.GetPlayer(claim.PlayerId))} wins the loose ball", Palette.Accent, 1.0f, true);
                         break;
                     case TackleResolved tackle:
+                        GameAudio.Play(Sfx.Tackle);
                         yield return Cutscene(CutsceneKind.Duel, S.GetPlayer(tackle.CarrierId).Team, S.GetPlayer(tackle.TacklerId).Team,
                             "TACKLE!", $"{Name(S.GetPlayer(tackle.TacklerId))} goes in on {Name(S.GetPlayer(tackle.CarrierId))} · 50/50", Palette.Warning);
                         yield return hud.Banner(tackle.Success ? "TACKLE WON" : "TACKLE FAILED",
                             $"{Name(S.GetPlayer(tackle.TacklerId))} on {Name(S.GetPlayer(tackle.CarrierId))}", Palette.Warning, 1.0f, true);
+                        GameAudio.Play(tackle.Success ? Sfx.TackleWon : Sfx.TackleLost);
                         if (tackle.Success) SetOwner(tackle.TacklerId);
                         break;
                     case ActionCancelled cancelled:
@@ -817,6 +860,7 @@ namespace FootballBoard.Presentation
                     case RestartAwarded restart:
                         SetOwner(restart.PlayerId);
                         var title = restart.Kind == RestartKind.Kickoff ? "KICK-OFF" : restart.Kind == RestartKind.GoalKick ? "GOAL KICK" : "THROW-IN";
+                        GameAudio.Play(restart.Kind == RestartKind.Kickoff ? Sfx.WhistleLong : Sfx.Whistle);
                         yield return hud.Banner(title, Name(restart.Team), Palette.TeamPrimary(restart.Team), 0.7f, restart.TieBrokenByCoin);
                         break;
                 }
@@ -836,6 +880,7 @@ namespace FootballBoard.Presentation
             }
             foreach (var e in run.OfType<MoveCancelled>())
                 routines.Add(StartCoroutine(_figures[e.PlayerId].Shake(0.3f)));
+            if (routines.Count > 0) GameAudio.Play(Sfx.Step);
             foreach (var r in routines) yield return r;
             if (_viewOwner.HasValue) PlaceBall(); // squares may now be shared: keep the ball on the owner's side
             if (run.OfType<MoveCancelled>().Any())
@@ -855,6 +900,7 @@ namespace FootballBoard.Presentation
             else if (isLong)
                 yield return Cutscene(CutsceneKind.LongBall, passer.Team, passer.Team.Opponent(),
                     "LONG BALL!", $"{Name(passer)} plays it long · on target 1 time in 9", Palette.TeamPrimary(passer.Team));
+            GameAudio.Play(isLong ? Sfx.LongBall : Sfx.Pass);
             yield return _ball.FlyTo(target, isLong ? 1.1f : 0.6f, isLong ? 2.2f : 0.25f);
 
             if (pass.NewOwnerId.HasValue) SetOwner(pass.NewOwnerId.Value);
@@ -879,6 +925,7 @@ namespace FootballBoard.Presentation
         private IEnumerator Cutscene(CutsceneKind kind, Team attacking, Team defending, string title, string subtitle, Color color, bool mirror = false, bool showBall = true)
         {
             if (!playCutscenes) yield break;
+            GameAudio.Play(Sfx.Swoosh, 0.8f);
             yield return hud.Cutscenes.Play(kind, attacking, defending, mirror, title, subtitle, color, showBall);
         }
 
@@ -909,13 +956,16 @@ namespace FootballBoard.Presentation
             {
                 case ShotOutcome.Blocked:
                 case ShotOutcome.LostContest:
+                    GameAudio.Play(shot.Outcome == ShotOutcome.Blocked ? Sfx.Tackle : Sfx.Clash);
                     yield return _ball.FlyTo(_figures[shot.DefenderId.Value].transform.position, 0.35f, 0.1f);
                     SetOwner(shot.DefenderId.Value);
                     yield return hud.Banner(shot.Outcome == ShotOutcome.Blocked ? "BLOCKED" : "DISPOSSESSED",
                         Name(S.GetPlayer(shot.DefenderId.Value)) + " wins the ball", Palette.Warning, 0.9f, shot.IsRandomized);
                     break;
                 case ShotOutcome.Missed:
+                    GameAudio.Play(Sfx.Shot);
                     yield return _ball.FlyTo(WideOfGoal(shot), 1.3f, 1.2f);
+                    GameAudio.Play(Sfx.Miss);
                     yield return hud.Banner("WIDE!", $"Only a {shot.Accuracy:P0} chance to hit the target", Palette.Chalk, 1.0f, false);
                     break;
                 case ShotOutcome.Saved:
@@ -924,7 +974,9 @@ namespace FootballBoard.Presentation
                     var keeperHome = keeperFigure.transform.position;
                     var savePoint = targetWorld - into * 0.25f;
                     var dive = StartCoroutine(keeperFigure.MoveTo(savePoint, 1.0f));
+                    GameAudio.Play(Sfx.Shot);
                     yield return _ball.FlyTo(savePoint, 1.2f, 0.8f);
+                    GameAudio.Play(Sfx.Save);
                     yield return dive;
                     var standUp = StartCoroutine(keeperFigure.MoveTo(keeperHome, 0.35f));
                     yield return _ball.FlyTo(keeperHome, 0.35f, 0f);
@@ -933,7 +985,9 @@ namespace FootballBoard.Presentation
                     yield return hud.Banner("SAVED!", $"On target, but the keeper had a {1 - shot.GoalChance:P0} chance to save", Palette.Chalk, 1.2f, false);
                     break;
                 case ShotOutcome.Goal:
+                    GameAudio.Play(Sfx.Shot);
                     yield return _ball.FlyTo(targetWorld + into * 0.6f, 1.2f, 0.8f);
+                    GameAudio.Play(Sfx.Goal);
                     _viewOwner = null;
                     break;
             }

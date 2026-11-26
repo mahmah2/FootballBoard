@@ -72,6 +72,7 @@ namespace FootballBoard.Presentation
 
         private void ClampFocus()
         {
+            if (_space == null) return; // no board yet (main menu): nothing to clamp to
             var p = focus.position;
             p.x = Mathf.Clamp(p.x, -_space.Width * 0.5f, _space.Width * 0.5f);
             p.z = Mathf.Clamp(p.z, -_space.Depth * 0.5f, _space.Depth * 0.5f);

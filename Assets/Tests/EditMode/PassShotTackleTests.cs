@@ -283,9 +283,11 @@ namespace FootballBoard.Domain.Tests
         [Test]
         public void OpponentOnShootersSquareContestsTheShot()
         {
-            var e = Create(new ScriptedRandom(0.6), MoveFirstRules());
+            // Move-first order: the automatic tackle fails (0.7), then the shot itself is contested (0.6 = lost).
+            var e = Create(new ScriptedRandom(0.7, 0.6), MoveFirstRules());
             Arrange(e, Red2, (Red2, 22, 4), (Blue2, 21, 3));
             var r = PlayTurn(e, Shoot(), TeamPlan.Empty().WithMove(Blue2, new Cell(22, 4)));
+            Assert.That(Single<TackleResolved>(r).Success, Is.False);
             Assert.That(Single<ShotResolved>(r).Outcome, Is.EqualTo(ShotOutcome.LostContest));
             Assert.That(e.State.BallCarrier.Id, Is.EqualTo(Blue2));
         }
@@ -319,13 +321,50 @@ namespace FootballBoard.Domain.Tests
         }
 
         [Test]
-        public void NoTackleWithoutRequest()
+        public void NoTackleWithoutRequestWhenAutomaticTacklesAreOff()
         {
-            var e = Create();
+            var rules = RulesConfig.CreateDefault();
+            rules.Tackle.AutomaticOnSharedSquare = false;
+            var e = Create(rules: rules);
             Arrange(e, Red2, (Red2, 12, 6), (Blue2, 13, 6));
             var r = PlayTurn(e, null, TeamPlan.Empty().WithMove(Blue2, new Cell(12, 6)));
             Assert.That(r.Events.OfType<TackleResolved>(), Is.Empty);
             Assert.That(e.State.BallCarrier.Id, Is.EqualTo(Red2));
+        }
+
+        [Test]
+        public void ArrivingOnTheCarriersSquareTacklesAutomatically()
+        {
+            // The defender walks onto the carrier's square without asking for a tackle.
+            var e = Create(new ScriptedRandom(0.3));
+            Arrange(e, Red2, (Red2, 12, 6), (Blue2, 13, 6));
+            var r = PlayTurn(e, null, TeamPlan.Empty().WithMove(Blue2, new Cell(12, 6)));
+            Assert.That(Single<TackleResolved>(r).TacklerId, Is.EqualTo(Blue2));
+            Assert.That(e.State.BallCarrier.Id, Is.EqualTo(Blue2));
+        }
+
+        [Test]
+        public void CarrierAndDefenderMovingOntoTheSameSquareMeansATackle()
+        {
+            // The reported case: both teams plan blind and pick the same empty square.
+            var e = Create(new ScriptedRandom(0.7));
+            Arrange(e, Red2, (Red2, 12, 6), (Blue2, 14, 6));
+            var r = PlayTurn(e,
+                TeamPlan.Empty().WithMove(Red2, new Cell(13, 6)),
+                TeamPlan.Empty().WithMove(Blue2, new Cell(13, 6)));
+            var tackle = Single<TackleResolved>(r);
+            Assert.That(tackle.TacklerId, Is.EqualTo(Blue2));
+            Assert.That(tackle.Success, Is.False);
+            Assert.That(e.State.BallCarrier.Id, Is.EqualTo(Red2));
+        }
+
+        [Test]
+        public void PlayersAlreadySharingASquareDoNotTackleAgainWhileStandingStill()
+        {
+            var e = Create(new ScriptedRandom(0.3));
+            Arrange(e, Red2, (Red2, 12, 6), (Blue2, 12, 6));
+            var r = PlayTurn(e, null, null);
+            Assert.That(r.Events.OfType<TackleResolved>(), Is.Empty);
         }
 
         [Test]

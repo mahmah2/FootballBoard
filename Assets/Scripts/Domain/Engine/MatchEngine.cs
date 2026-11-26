@@ -517,22 +517,33 @@ namespace FootballBoard.Domain
             return contenders;
         }
 
+        /// <summary>
+        /// After movement: an opponent on the ball carrier's square tackles (once per turn) if it asked
+        /// to, or, with <c>tackle.automaticOnSharedSquare</c>, whenever it or the carrier moved onto
+        /// that square this turn (both teams plan blind, so they often arrive together). Players who
+        /// already shared the square and both stood still do not tackle again.
+        /// </summary>
         private void ResolveTackles(List<MoveOrder> executed, HashSet<int> clashed, List<GameEvent> events)
         {
             var carrier = State.BallCarrier;
-            if (carrier == null) return;
+            if (carrier == null || !Rules.Tackle.Enabled) return;
 
-            foreach (var m in executed)
-            {
-                if (!m.Tackle || clashed.Contains(m.PlayerId)) continue;
-                var tackler = State.GetPlayer(m.PlayerId);
-                if (tackler.Team == carrier.Team || tackler.Position != carrier.Position) continue;
+            var opponents = State.PlayersAt(carrier.Position)
+                .Where(p => p.Team != carrier.Team && p.Active && !clashed.Contains(p.Id))
+                .OrderBy(p => p.Id)
+                .ToList();
+            if (opponents.Count == 0) return;
 
-                var success = _random.Chance(Rules.Tackle.SuccessChance);
-                events.Add(new TackleResolved(tackler.Id, carrier.Id, success));
-                if (success) GiveBall(tackler);
-                return; // one tackle per turn: at most one opponent can share the carrier's square anyway
-            }
+            var moved = new HashSet<int>(executed.Select(m => m.PlayerId));
+            var requested = new HashSet<int>(executed.Where(m => m.Tackle).Select(m => m.PlayerId));
+            var tackler = opponents.FirstOrDefault(p => requested.Contains(p.Id));
+            if (tackler == null && Rules.Tackle.AutomaticOnSharedSquare)
+                tackler = opponents.FirstOrDefault(p => moved.Contains(p.Id) || moved.Contains(carrier.Id));
+            if (tackler == null) return;
+
+            var success = _random.Chance(Rules.Tackle.SuccessChance);
+            events.Add(new TackleResolved(tackler.Id, carrier.Id, success));
+            if (success) GiveBall(tackler);
         }
 
         private Team? ResolveAction(Player carrier, CarrierAction action, List<GameEvent> events)

@@ -16,7 +16,9 @@ namespace FootballBoard.Presentation
         private readonly List<GameObject> _cellPool = new List<GameObject>();
         private readonly List<LineRenderer> _linePool = new List<LineRenderer>();
         private readonly List<ChevronTrail> _trailPool = new List<ChevronTrail>();
-        private int _cellsUsed, _linesUsed, _trailsUsed;
+        private readonly List<MoveTrail> _movePool = new List<MoveTrail>();
+        private readonly List<RadarRing> _ringPool = new List<RadarRing>();
+        private int _cellsUsed, _linesUsed, _trailsUsed, _movesUsed, _ringsUsed;
 
         public void Build(Pitch pitch, BoardSpace space, MaterialKit kit)
         {
@@ -106,7 +108,9 @@ namespace FootballBoard.Presentation
             foreach (var go in _cellPool) go.SetActive(false);
             foreach (var lr in _linePool) lr.gameObject.SetActive(false);
             foreach (var trail in _trailPool) trail.Hide();
-            _cellsUsed = _linesUsed = _trailsUsed = 0;
+            foreach (var move in _movePool) move.Hide();
+            foreach (var ring in _ringPool) ring.gameObject.SetActive(false);
+            _cellsUsed = _linesUsed = _trailsUsed = _movesUsed = _ringsUsed = 0;
         }
 
         public void HighlightCell(Cell cell, Color color, float size = 0.86f)
@@ -138,6 +142,23 @@ namespace FootballBoard.Presentation
         {
             if (_trailsUsed == _trailPool.Count) _trailPool.Add(ChevronTrail.Create(_overlay, _kit));
             _trailPool[_trailsUsed++].Show(from, to, color);
+        }
+
+        /// <summary>A planned move: flowing dots from the player toward its destination.</summary>
+        public void DrawMoveTrail(Vector3 from, Vector3 to, Color color)
+        {
+            if (_movesUsed == _movePool.Count) _movePool.Add(MoveTrail.Create(_overlay, _kit));
+            _movePool[_movesUsed++].Show(from, to, color);
+        }
+
+        /// <summary>A rotating radar donut on a destination square.</summary>
+        public void DrawTargetRing(Cell cell, Color color)
+        {
+            if (_ringsUsed == _ringPool.Count) _ringPool.Add(RadarRing.Create(_overlay, 0.02f, PlayerFigure.FigureScale, "TargetRing"));
+            var ring = _ringPool[_ringsUsed++];
+            ring.transform.position = _space.CellToWorld(cell) + Vector3.up * 0.02f;
+            ring.SetTint(color);
+            ring.gameObject.SetActive(true);
         }
 
         // ------------------------------------------------------------------ helpers

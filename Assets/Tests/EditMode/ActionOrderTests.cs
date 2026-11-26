@@ -26,12 +26,14 @@ namespace FootballBoard.Domain.Tests
         [Test]
         public void DefenderStepsOntoReceiverTooLateToContestThePass()
         {
-            var e = Create();
+            // The pass is not contested; arriving on the new carrier's square is an automatic tackle (failed here).
+            var e = Create(new ScriptedRandom(0.7));
             Arrange(e, Red2, (Red2, 10, 6), (Red3, 16, 6), (Blue2, 17, 6));
             var r = PlayTurn(e, TeamPlan.Empty().WithAction(CarrierAction.StraightPass(Red3)),
                 TeamPlan.Empty().WithMove(Blue2, new Cell(16, 6)));
             var pass = Single<PassResolved>(r);
             Assert.That(pass.Contested, Is.False);
+            Assert.That(Single<TackleResolved>(r).Success, Is.False);
             Assert.That(e.State.BallCarrier.Id, Is.EqualTo(Red3));
             Assert.That(Pos(e, Blue2), Is.EqualTo(new Cell(16, 6)));
         }

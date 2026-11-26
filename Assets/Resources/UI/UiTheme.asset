@@ -1,0 +1,53 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 39089280807a9f248a369c3eb07cac6a, type: 3}
+  m_Name: UiTheme
+  m_EditorClassIdentifier: Assembly-CSharp::FootballBoard.Presentation.UiTheme
+  displayFont: {fileID: 11400000, guid: 125cb55b44b24c4393181402bc6200e6, type: 2}
+  bodyFont: {fileID: 11400000, guid: 125cb55b44b24c4393181402bc6200e6, type: 2}
+  bodyCharacterSpacing: 2
+  displaySizeScale: 1.15
+  blue:
+    fill: {r: 0.18039216, g: 0.43529412, b: 0.8784314, a: 1}
+    outline: {r: 0.043137256, g: 0.16470589, b: 0.41960785, a: 1}
+    textTop: {r: 1, g: 0.8980392, b: 0.5411765, a: 1}
+    textBottom: {r: 0.9490196, g: 0.6392157, b: 0.13333334, a: 1}
+    shine: {r: 1, g: 1, b: 1, a: 0.26}
+  green:
+    fill: {r: 0.18431373, g: 0.7058824, b: 0.3529412, a: 1}
+    outline: {r: 0.050980393, g: 0.2901961, b: 0.13725491, a: 1}
+    textTop: {r: 1, g: 1, b: 1, a: 1}
+    textBottom: {r: 0.8666667, g: 0.96862745, b: 0.78431374, a: 1}
+    shine: {r: 1, g: 1, b: 1, a: 0.28}
+  red:
+    fill: {r: 0.8784314, g: 0.28627452, b: 0.23137255, a: 1}
+    outline: {r: 0.36078432, g: 0.07450981, b: 0.047058824, a: 1}
+    textTop: {r: 1, g: 1, b: 1, a: 1}
+    textBottom: {r: 1, g: 0.8784314, b: 0.78431374, a: 1}
+    shine: {r: 1, g: 1, b: 1, a: 0.25}
+  gold:
+    fill: {r: 1, g: 0.7882353, b: 0.23529412, a: 1}
+    outline: {r: 0.47843137, g: 0.2901961, b: 0, a: 1}
+    textTop: {r: 0.10980392, g: 0.24313726, b: 0.54901963, a: 1}
+    textBottom: {r: 0.043137256, g: 0.16470589, b: 0.41960785, a: 1}
+    shine: {r: 1, g: 1, b: 1, a: 0.38}
+  slate:
+    fill: {r: 0.22745098, g: 0.2901961, b: 0.36078432, a: 1}
+    outline: {r: 0.07058824, g: 0.101960786, b: 0.14117648, a: 1}
+    textTop: {r: 0.9647059, g: 0.8901961, b: 0.827451, a: 1}
+    textBottom: {r: 0.7882353, g: 0.72156864, b: 0.65882355, a: 1}
+    shine: {r: 1, g: 1, b: 1, a: 0.14}
+  titleColor: {r: 1, g: 0.8235294, b: 0.24705882, a: 1}
+  titleOutline: {r: 0.043137256, g: 0.16470589, b: 0.41960785, a: 1}
+  menuBackground: {fileID: 0}
+  menuBackgroundTint: {r: 0.8, g: 0.8, b: 0.8, a: 1}
+  pauseTint: {r: 0, g: 0, b: 0, a: 0.5}

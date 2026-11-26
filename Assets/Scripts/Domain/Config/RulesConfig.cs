@@ -305,6 +305,13 @@ namespace FootballBoard.Domain.Config
         public bool Enabled { get; set; } = true;
         public double SuccessChance { get; set; } = 0.5;
 
+        /// <summary>
+        /// True: an opponent that ends the movement on the ball carrier's square tackles automatically
+        /// when it or the carrier moved there this turn, even without asking. False: only requested
+        /// tackles (a move ordered onto the carrier's square) happen.
+        /// </summary>
+        public bool AutomaticOnSharedSquare { get; set; } = true;
+
         internal void Validate(List<string> e)
         {
             RulesConfig.CheckProbability(e, "tackle.successChance", SuccessChance);
